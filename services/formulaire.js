@@ -1425,7 +1425,7 @@ router.get('/maintenance/:id/history', async (req, res) => {
       FROM "PreventiveMaintenance_Hist" h
       JOIN "User" u ON h.user_id = u.user_id
       WHERE h.maintenance_id = $1
-      ORDER BY h.action_date DESC`, 
+      ORDER BY h.action_date DESC`,
       [req.params.id]
     );
 
@@ -1435,53 +1435,56 @@ router.get('/maintenance/:id/history', async (req, res) => {
     const formatDate = (date) => {
       if (!date) return null;
       const d = new Date(date);
-      return d.toISOString().split('T')[0]; // Normalize to YYYY-MM-DD
+      return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
     };
 
-    const reversedRows = [...result.rows].reverse();
+    const reversedRows = [...result.rows].reverse(); // process oldest → newest
 
-    reversedRows.forEach(current => {
-      if (previous) {
-        const changes = {};
-        const fieldsToCompare = [
-          'machine_id', 'maintenance_type', 'task_name', 'task_description',
-          'start_date', 'end_date', 'completed_date', 'task_status', 'assigned_to'
-        ];
-
-        fieldsToCompare.forEach(field => {
-          const prevVal = ['start_date', 'end_date', 'completed_date'].includes(field)
-            ? formatDate(previous[field])
-            : previous[field];
-
-          const currVal = ['start_date', 'end_date', 'completed_date'].includes(field)
-            ? formatDate(current[field])
-            : current[field];
-
-          if (prevVal !== currVal) {
-            changes[field] = {
-              old: prevVal,
-              new: currVal
-            };
-          }
-        });
-
-        if (Object.keys(changes).length > 0) {
-          history.push({
-            action_date: current.action_date,
-            modified_by: current.modified_by,
-            changes
-          });
-        }
+    reversedRows.forEach((current) => {
+      if (!previous) {
+        // Nothing to compare yet
+        previous = current;
+        return;
       }
+
+      const changes = {};
+      const fieldsToCompare = [
+        'machine_id', 'maintenance_type', 'task_name', 'task_description',
+        'start_date', 'end_date', 'completed_date', 'task_status', 'assigned_to'
+      ];
+
+      fieldsToCompare.forEach(field => {
+        const prevVal = ['start_date', 'end_date', 'completed_date'].includes(field)
+          ? formatDate(previous[field])
+          : previous[field];
+
+        const currVal = ['start_date', 'end_date', 'completed_date'].includes(field)
+          ? formatDate(current[field])
+          : current[field];
+
+        if (prevVal !== currVal) {
+          changes[field] = { old: prevVal, new: currVal };
+        }
+      });
+
+      if (Object.keys(changes).length > 0) {
+        history.push({
+          action_date: current.action_date,
+          modified_by: current.modified_by,
+          changes
+        });
+      }
+
       previous = current;
     });
 
-    res.json(history.reverse()); // Return newest first
+    res.json(history.reverse()); // newest first
   } catch (err) {
     console.error("Error fetching history:", err);
     res.status(500).json({ message: "Error fetching history" });
   }
 });
+
 
 
 router.put('/maintenance/:id', async (req, res) => {
@@ -1540,12 +1543,12 @@ router.put('/maintenance/:id', async (req, res) => {
         previous.creator,
         previous.creation_date,
         'UPDATE',
-        new Date(),     // action_date
+        new Date(),
         user_id
       ]
     );
 
-    // Step 3: Perform the update
+    // Step 3: Perform the actual update
     await pool.query(
       `
       UPDATE "PreventiveMaintenance"
@@ -1570,10 +1573,46 @@ router.put('/maintenance/:id', async (req, res) => {
         task_status || 'In progress',
         assigned_to,
         creator,
-        new Date(), // updated creation_date (can be changed if you track separately)
+        new Date(), // updated creation_date (optionally keep original)
         start_date,
         end_date,
         id
+      ]
+    );
+
+    // Step 4: Fetch updated row and insert the new state into history
+    const updatedResult = await pool.query(
+      `SELECT * FROM "PreventiveMaintenance" WHERE maintenance_id = $1`,
+      [id]
+    );
+
+    const updated = updatedResult.rows[0];
+
+    await pool.query(
+      `
+      INSERT INTO "PreventiveMaintenance_Hist" 
+        (maintenance_id, machine_id, maintenance_type, task_name, task_description, 
+         start_date, end_date, completed_date, task_status, assigned_to, 
+         creator, creation_date, action_type, action_date, user_id) 
+      VALUES 
+        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      `,
+      [
+        id,
+        updated.machine_id,
+        updated.maintenance_type,
+        updated.task_name,
+        updated.task_description,
+        updated.start_date,
+        updated.end_date,
+        updated.completed_date,
+        updated.task_status,
+        updated.assigned_to,
+        updated.creator,
+        updated.creation_date,
+        'UPDATE',
+        new Date(),
+        user_id
       ]
     );
 
