@@ -23,7 +23,7 @@ const connectedUsers = socketManager.connectedUsers; // <-- use shared object
 // Middleware
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
-app.use(cors({ origin: 'http://localhost:5173' }));
+app.use(cors({ origin: 'https://machinery-system.azurewebsites.net' }));
 app.use(express.json());
 
 io.on('connection', (socket) => {
