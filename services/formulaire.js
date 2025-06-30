@@ -90,13 +90,6 @@ router.post('/register', async (req, res) => {
   const { email, password, role } = req.body;
 
   try {
-    // Validate email domain
-    if (!email || !email.endsWith('@avocarbon.com')) {
-      return res.status(400).json({ 
-        message: 'Only users with @avocarbon.com email addresses are allowed to register' 
-      });
-    }
-
     // Check if the user already exists
     const userExists = await pool.query('SELECT * FROM "User" WHERE email = $1', [email]);
     if (userExists.rows.length > 0) {
