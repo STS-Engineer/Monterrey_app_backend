@@ -9,7 +9,7 @@ const path = require('path');
 const socketManager = require('./socketManager');
 const app = express();
 const server = http.createServer(app);
-const initTaskAlertScheduler = require('./startup/initTaskAlertScheduler');
+
 const io = socketIO(server, {
   cors: {
     origin: '*',
@@ -57,7 +57,7 @@ app.use('/api/inbox', inboxRouter);
 
 app.use('/ajouter', prodformrouter);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-initTaskAlertScheduler();
+
 
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
