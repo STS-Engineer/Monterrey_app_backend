@@ -7,7 +7,7 @@ const multer = require('multer');
 const path = require('path');
 const { getIo, getConnectedUsers } = require('../socketManager');
 const nodemailer = require('nodemailer');
-const { sendEmail } = require('./sendMail'); 
+
 
 // Middleware to authenticate and extract user from JWT
 const authenticate = (req, res, next) => {
@@ -2071,7 +2071,7 @@ router.put('/tasks/:id/status', async (req, res) => {
           const subject = `Task "${taskName}" deadline is near`;
           const body = `Hello,\n\nThe task "${taskName}" is still in progress and its deadline is in ${daysLeft} day(s). Please ensure it is completed on time.\n\nRegards,\nYour Company`;
 
-          await sendEmail(assignedEmail, subject, body);
+          
           console.log(`Email sent successfully to ${assignedEmail}`);
         } else {
           console.log(`No email sent - deadline is not within 2 days.`);
