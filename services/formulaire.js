@@ -2091,65 +2091,66 @@ router.put('/tasks/:id/status', async (req, res) => {
 
 // restrictions for the managers 
 
-router.get('/manager-executors/:managerId', async (req, res) => {
+router.get('/manager-executors/:managerId', async (req, res) => {   
   const { managerId } = req.params;
-
-  try {
-    const result = await pool.query(
-      `SELECT u.user_id, u.email, u.role 
+  
+  try {     
+    const result = await pool.query(       
+      `SELECT u.user_id, u.email         
        FROM "User" u
-       JOIN "TeamAssignments" ta ON u.user_id = ta.executor_id
-       WHERE ta.manager_id = $1 AND u.role = 'EXECUTOR'`,
-      [managerId]
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching manager executors:', err);
-    res.status(500).json({ message: 'Error fetching manager executors' });
-  }
+       INNER JOIN "TeamAssignments" mea ON u.user_id = mea.executor_id        
+       WHERE u.role = 'EXECUTOR' 
+       AND mea.manager_id = $1
+       ORDER BY u.email`,
+       [managerId]     
+    );      
+    
+    res.json(result.rows);   
+  } catch (err) {     
+    console.error('Error fetching manager executors:', err);     
+    res.status(500).json({ message: 'Error fetching manager executors' });   
+  } 
 });
 
 router.post('/assign-team', async (req, res) => {
   const { managerId, executorIds } = req.body;
 
-  if (!managerId || !executorIds || !Array.isArray(executorIds) || executorIds.length === 0) {
-    return res.status(400).json({ message: 'managerId and executorIds (non-empty array) are required' });
+  if (!managerId || !Array.isArray(executorIds)) {
+    return res.status(400).json({ message: 'managerId and executorIds are required' });
   }
 
   try {
-    // Check manager exists
+    // Validate manager exists
     const managerCheck = await pool.query('SELECT * FROM "User" WHERE user_id = $1', [managerId]);
     if (managerCheck.rows.length === 0) {
       return res.status(404).json({ message: 'Manager not found' });
     }
 
-    // Check executors exist
-    const executorsCheck = await pool.query(
-      `SELECT user_id FROM "User" WHERE user_id = ANY($1::int[])`,
-      [executorIds]
+    // Remove executors not in the new list (unassign them)
+    await pool.query(
+      `DELETE FROM "TeamAssignments"
+       WHERE manager_id = $1
+       AND executor_id NOT IN (SELECT unnest($2::int[]))`,
+      [managerId, executorIds]
     );
-    if (executorsCheck.rows.length !== executorIds.length) {
-      return res.status(404).json({ message: 'One or more executors not found' });
-    }
 
-    // Insert all assignments (ignore duplicates)
+    // Add new assignments (ignore if already exists)
     const insertPromises = executorIds.map(executorId =>
       pool.query(
-        `INSERT INTO "TeamAssignments" (manager_id, executor_id) VALUES ($1, $2)
+        `INSERT INTO "TeamAssignments" (manager_id, executor_id)
+         VALUES ($1, $2)
          ON CONFLICT (manager_id, executor_id) DO NOTHING`,
         [managerId, executorId]
       )
     );
     await Promise.all(insertPromises);
 
-    res.status(201).json({ message: 'Team assigned successfully' });
+    res.status(200).json({ message: 'Team updated successfully' });
   } catch (err) {
     console.error('Assign Team Error:', err);
-    res.status(500).json({ message: 'Failed to assign team', error: err.message });
+    res.status(500).json({ message: 'Failed to update team', error: err.message });
   }
 });
-
 
 router.get('/team-executors/:managerId', async (req, res) => {
   const { managerId } = req.params;
@@ -2184,13 +2185,13 @@ router.get('/team-executors/:managerId', async (req, res) => {
   }
 });
 
-
 router.get('/available-executors', async (req, res) => {   
   try {     
     const result = await pool.query(       
       `SELECT u.user_id, u.email         
        FROM "User" u        
-       WHERE u.role = 'EXECUTOR'`     
+       WHERE u.role = 'EXECUTOR'
+       ORDER BY u.email`     
     );      
     
     res.json(result.rows);   
