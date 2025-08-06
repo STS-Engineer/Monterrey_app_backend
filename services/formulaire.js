@@ -2185,24 +2185,21 @@ router.get('/team-executors/:managerId', async (req, res) => {
 });
 
 
-router.get('/available-executors', async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT u.user_id, u.email 
-       FROM "User" u
-       WHERE u.role = 'EXECUTOR' 
-       AND NOT EXISTS (
-         SELECT 1 FROM "TeamAssignments" ta 
-         WHERE ta.executor_id = u.user_id
-       )`
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching available executors:', err);
-    res.status(500).json({ message: 'Error fetching available executors' });
-  }
+router.get('/available-executors', async (req, res) => {   
+  try {     
+    const result = await pool.query(       
+      `SELECT u.user_id, u.email         
+       FROM "User" u        
+       WHERE u.role = 'EXECUTOR'`     
+    );      
+    
+    res.json(result.rows);   
+  } catch (err) {     
+    console.error('Error fetching available executors:', err);     
+    res.status(500).json({ message: 'Error fetching available executors' });   
+  } 
 });
+
 
 router.get('/alerts', async (req, res) => {
   try {
