@@ -1220,82 +1220,175 @@ router.post('/maintenance', async (req, res) => {
     creator,
     start_date,
     end_date,
-    user_id
+    user_id,
+    // Recurrence fields
+    recurrence,        // 'none', 'daily', 'weekly', 'monthly', 'yearly'
+    interval,          // number
+    weekdays,          // array for weekly [1,3]
+    monthlyDay,        // for monthly by day (e.g., 15th)
+    monthlyMonth,      // month number if needed
+    monthlyOrdinal,    // 'first', 'second', etc
+    monthlyWeekday,    // 0-6 Sunday-Saturday
+    // 🔥 Yearly fields
+    yearlyMode,        // 'day' | 'weekday'
+    yearlyDay,         // for "day" mode (e.g., 15th)
+    yearlyMonth,       // 0–11
+    yearlyOrdinal,     // 'first', 'second', 'third', 'fourth', 'last'
+    yearlyWeekday,     // 0–6 (Sun–Sat)
+    recurrence_end_date
   } = req.body;
 
   try {
-    // Start transaction
     await pool.query('BEGIN');
+
     const normalizedStartDate = normalizeDate(start_date);
     const normalizedEndDate = normalizeDate(end_date);
+    const normalizedUntilDate = recurrence_end_date ? normalizeDate(recurrence_end_date) : null;
 
-
-
-
-    // Fetch the first machine_id from the machine table
+    // Fetch machine_id (temporary: always first machine)
     const machineresult = await pool.query('SELECT machine_id FROM "Machines" LIMIT 1');
-    if (machineresult.rows.length === 0) {
-      throw new Error("No machine found");
-    }
+    if (machineresult.rows.length === 0) throw new Error("No machine found");
     const machine_id = machineresult.rows[0].machine_id;
 
-    // Insert into the PreventiveMaintenance table
- const maintenanceResult = await pool.query(
-  `INSERT INTO "PreventiveMaintenance" 
-    (machine_id, maintenance_type, task_name, task_description,completed_date, task_status, assigned_to, creator, creation_date, start_date, end_date) 
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
-   RETURNING maintenance_id`,
-  [
-     machine_id,
-     maintenance_type,
-     task_name,
-     task_description,
-     completed_date,
-     'In progress',
-     assigned_to,
-     creator,
-     new Date(),
-     normalizedStartDate,
-     normalizedEndDate,
-  ]
-);
+    // Insert into PreventiveMaintenance
+    const maintenanceResult = await pool.query(
+      `INSERT INTO "PreventiveMaintenance" 
+        (machine_id, maintenance_type, task_name, task_description, completed_date, task_status, assigned_to, creator, creation_date, start_date, end_date) 
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) 
+       RETURNING maintenance_id`,
+      [
+        machine_id,
+        maintenance_type,
+        task_name,
+        task_description,
+        completed_date,
+        'In progress',
+        assigned_to,
+        creator,
+        new Date(),
+        normalizedStartDate,
+        normalizedEndDate,
+      ]
+    );
 
     const maintenance_id = maintenanceResult.rows[0].maintenance_id;
 
-    // Insert into PreventiveMaintenance_Hist table
-await pool.query(
-  `INSERT INTO "PreventiveMaintenance_Hist" 
-    (maintenance_id, machine_id, maintenance_type, task_name, task_description, start_date, end_date, completed_date, task_status, assigned_to, creator, creation_date, action_type, action_date, user_id) 
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-  [
-    maintenance_id,
-    machine_id,
-    maintenance_type,
-    task_name,
-    task_description,
-    normalizedStartDate,
-    normalizedEndDate,
-    completed_date,
-    'In progress',
-    assigned_to,
-    creator,
-    new Date(),
-    'CREATE',
-    new Date(),
-    user_id
-  ]
-);
+    // --- Handle recurrence mapping ---
+    const ordinals = { first: 1, second: 2, third: 3, fourth: 4, last: -1 };
+    let week_of_month = null;
+    let weekday = null;
+    let month = null;
+    let monthday = null;
 
-    
-    // Commit transaction
+    // Monthly mapping
+    if (recurrence === 'monthly') {
+      if (monthlyOrdinal && monthlyWeekday !== undefined) {
+        // Example: First Tuesday → week_of_month = 1, weekday = 2
+        week_of_month = ordinals[monthlyOrdinal.toLowerCase()] || null;
+        weekday = monthlyWeekday;
+        month = null;
+        monthday = null;
+      } else if (monthlyDay) {
+        monthday = monthlyDay;
+        month = null;
+      }
+    }
+
+    // Yearly mapping
+    if (recurrence === 'yearly') {
+      if (yearlyMode === 'day') {
+        // Example: April 15 → month=4, monthday=15
+        month = (yearlyMonth !== undefined ? yearlyMonth + 1 : normalizedStartDate.getMonth() + 1); // DB months 1–12
+        monthday = yearlyDay;
+      } else if (yearlyMode === 'weekday') {
+        // Example: Second Tuesday in January
+        week_of_month = ordinals[yearlyOrdinal?.toLowerCase()] || null;
+        weekday = yearlyWeekday;
+        month = (yearlyMonth !== undefined ? yearlyMonth + 1 : normalizedStartDate.getMonth() + 1);
+      }
+    }
+
+    // Insert into Maintenance_schedule
+    await pool.query(`
+      INSERT INTO "Maintenance_schedule"
+      (maintenance_id, start_at, end_at, timezone, repeat_kind, interval, weekdays, monthday, month, week_of_month, weekday, until, notes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+    `, [
+      maintenance_id,
+      normalizedStartDate,
+      normalizedEndDate,
+      'Africa/Tunis',
+      recurrence || 'none',
+      interval || 1,
+      weekdays || null,
+      monthday,
+      month,
+      week_of_month,
+      weekday,
+      normalizedUntilDate,
+      task_description
+    ]);
+
+    // PreventiveMaintenance_Hist insert
+    await pool.query(
+      `INSERT INTO "PreventiveMaintenance_Hist" 
+        (maintenance_id, machine_id, maintenance_type, task_name, task_description, start_date, end_date, completed_date, task_status, assigned_to, creator, creation_date, action_type, action_date, user_id) 
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+      [
+        maintenance_id,
+        machine_id,
+        maintenance_type,
+        task_name,
+        task_description,
+        normalizedStartDate,
+        normalizedEndDate,
+        completed_date,
+        'In progress',
+        assigned_to,
+        creator,
+        new Date(),
+        'CREATE',
+        new Date(),
+        user_id
+      ]
+    );
+
     await pool.query('COMMIT');
 
     res.status(201).json({
-      message: 'Maintenance record added successfully',
-      maintenance_id
+      id: maintenance_id,
+      task_name,
+      maintenance_type,
+      task_description,
+      assigned_to,
+      task_status: 'In progress',
+      machine_id,
+      start_date: normalizedStartDate.toISOString(),
+      end_date: normalizedEndDate.toISOString(),
+      creator,
+      user_id,
+      recurrence: recurrence || 'none',
+      interval: interval || 1,
+      weekdays: weekdays || [],
+      // Monthly
+      monthly_mode: monthlyDay ? 'day' : (monthlyOrdinal ? 'weekday' : null),
+      monthly_day: monthlyDay || null,
+      monthly_ordinal: monthlyOrdinal || null,
+      monthly_weekday: monthlyWeekday || null,
+      // Yearly
+      yearly_mode: yearlyMode || null,
+      yearly_day: yearlyDay || null,
+      yearly_month: yearlyMonth || null,
+      yearly_ordinal: yearlyOrdinal || null,
+      yearly_weekday: yearlyWeekday || null,
+      recurrence_end_date: normalizedUntilDate ? normalizedUntilDate.toISOString() : null,
+      week_of_month,
+      weekday,
+      monthday,
+      month
     });
+
   } catch (err) {
-    // Rollback transaction on error
     await pool.query('ROLLBACK');
     console.error('Error adding maintenance record:', err);
     res.status(500).json({ message: 'Error adding maintenance record' });
@@ -1307,25 +1400,37 @@ router.get('/maintenance', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
-        maintenance_id AS id, 
-        task_name, 
-        start_date,
-        end_date,
-        maintenance_type,
-        task_description,
-        completed_date,
-        assigned_to,
-        creator,
-        task_status,
-        machine_id
-      FROM "PreventiveMaintenance"
-      ORDER BY start_date DESC
+        pm.maintenance_id AS id,
+        pm.task_name,
+        pm.start_date,
+        pm.end_date,
+        pm.maintenance_type,
+        pm.task_description,
+        pm.completed_date,
+        pm.assigned_to,
+        pm.creator,
+        pm.task_status,
+        pm.machine_id,
+        ms.repeat_kind AS recurrence,
+        ms.interval,
+        ms.weekdays,
+        ms.monthday AS monthly_day,
+        ms.week_of_month AS monthly_ordinal,
+        ms.weekday AS monthly_weekday,
+        ms.until AS recurrence_end_date
+      FROM "PreventiveMaintenance" pm
+      LEFT JOIN "Maintenance_schedule" ms
+      ON pm.maintenance_id = ms.maintenance_id
+      ORDER BY pm.start_date DESC
     `);
 
     const events = result.rows.map(event => ({
       ...event,
-      start: event.start_date,
-      end: event.end_date,
+      start_date: event.start_date.toISOString(),        // Convert to ISO string
+      end_date: event.end_date.toISOString(),            // Convert to ISO string
+      recurrence_end_date: event.recurrence_end_date ? event.recurrence_end_date.toISOString() : null,
+      monthly_mode: event.monthly_day ? 'day' : (event.monthly_ordinal ? 'weekday' : null),
+      weekdays: event.weekdays || []
     }));
 
     res.status(200).json(events);
@@ -1334,6 +1439,7 @@ router.get('/maintenance', async (req, res) => {
     res.status(500).json({ message: "Error fetching maintenance events" });
   }
 });
+
 
 router.get('/maintenancee', async (req, res) => {
   const { userId, role } = req.query;
