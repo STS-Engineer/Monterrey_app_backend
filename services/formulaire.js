@@ -1424,14 +1424,25 @@ router.get('/maintenance', async (req, res) => {
       ORDER BY pm.start_date DESC
     `);
 
-    const events = result.rows.map(event => ({
-      ...event,
-      start_date: event.start_date.toISOString(),        // Convert to ISO string
-      end_date: event.end_date.toISOString(),            // Convert to ISO string
-      recurrence_end_date: event.recurrence_end_date ? event.recurrence_end_date.toISOString() : null,
-      monthly_mode: event.monthly_day ? 'day' : (event.monthly_ordinal ? 'weekday' : null),
-      weekdays: event.weekdays || []
-    }));
+    const events = [];
+
+    const ordinalMapNumToStr = { 1: 'first', 2: 'second', 3: 'third', 4: 'fourth', '-1': 'last' };
+
+
+    result.rows.forEach(event => {
+      const startDate = new Date(event.start_date);
+      const endDate = new Date(event.end_date);
+      const until = event.recurrence_end_date ? new Date(event.recurrence_end_date) : null;
+
+      // Add the base event
+      events.push({
+        ...event,
+        start_date: startDate.toISOString(),
+        end_date: endDate.toISOString(),
+      });
+
+ 
+    });
 
     res.status(200).json(events);
   } catch (err) {
