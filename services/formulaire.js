@@ -1130,57 +1130,141 @@ router.get('/facilities/machine/:machine_id', async (req, res) => {
   }
 });
 
-
 router.post('/failure', async (req, res) => {
-  const {  failure_desc , solution, failure_date, status, resolved_date, executor, creator} = req.body;
+  const {
+    machine_id,
+    failure_desc,
+    solution,
+    failure_date,
+    status,
+    resolved_date,
+    user_id,
+    role
+  } = req.body;
 
   try {
-    // Check if the machine_id exists in the Machines table
-    const machineResult = await pool.query('SELECT * FROM machine WHERE machine_id = $1', [machine_id]);
+    const machineId = parseInt(machine_id, 10);
 
-    // If the machine does not exist, return an error
+    // 1. Check if machine exists
+    const machineResult = await pool.query(
+      'SELECT * FROM "Machines" WHERE machine_id = $1',
+      [machineId]
+    );
     if (machineResult.rows.length === 0) {
       return res.status(400).json({ message: 'Machine ID does not exist' });
     }
 
-  const  machine_id = machineResult.rows[0].machine_id;
-    // Start transaction
-    await pool.query('BEGIN');
+    let creator = null;
+    let executor = null;
 
-    // Insert the facility requirements
-    const facilityResult = await pool.query(
-      'INSERT INTO "FailureLog" (air_needed, failure_desc , solution, failure_date, status, resolved_date, executor, creator) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *',
-      [machine_id, failure_desc , solution, failure_date, status, resolved_date, executor, creator]
+    if (role === "MANAGER") {
+      creator = user_id; // manager logs failure
+    } else if (role === "EXECUTOR") {
+      executor = user_id;
+
+      // find manager for this executor
+      const teamResult = await pool.query(
+        `SELECT manager_id 
+         FROM "TeamAssignments" 
+         WHERE executor_id = $1`,
+        [executor]
+      );
+
+      if (teamResult.rows.length === 0) {
+        return res.status(400).json({ message: 'Executor not assigned to any manager' });
+      }
+
+      creator = teamResult.rows[0].manager_id; // assign manager as creator
+    }
+
+    // 2. Insert failure log
+    const failureResult = await pool.query(
+      `INSERT INTO "FailureLog"
+       (machine_id, failure_desc, solution, failure_date, status, resolved_date, executor, creator)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [machineId, failure_desc, solution, failure_date, status, resolved_date, executor, creator]
     );
 
-    // Commit transaction
-    await pool.query('COMMIT');
-
-    res.status(201).json({ 
-      message: 'Facilities requirements added successfully', 
-      machine: machineResult.rows[0], 
-      facility: facilityResult.rows[0] 
+    res.status(201).json({
+      message: 'Failure reported successfully',
+      failure: failureResult.rows[0]
     });
   } catch (err) {
-    // Rollback in case of an error
-    await pool.query('ROLLBACK');
-    console.error('Error adding machine and product:', err);
-    res.status(500).json({ message: 'Error adding machine and product' });
+    console.error('Error inserting failure log:', err);
+    res.status(500).json({ message: 'Error inserting failure log' });
   }
 });
 
+
+// Get all failures
 router.get('/failures', async (req, res) => {
   try {
-    // Fetch all machines from the database
-    const result = await pool.query(`
-      SELECT * FROM failure
-    `);
+    const result = await pool.query(
+      `SELECT f.failure_id, f.machine_id, m.machine_name, f.failure_desc, f.solution, 
+              f.failure_date, f.status, f.executor, f.creator, f.resolved_date
+       FROM "FailureLog" f
+       JOIN "Machines" m ON f.machine_id = m.machine_id
+       ORDER BY f.failure_date DESC`
+    );
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Error fetching machines' });
+    console.error('Error fetching failures:', err);
+    res.status(500).json({ message: 'Error fetching failures' });
   }
 });
+
+// Update failure
+router.put('/failure/:failure_id', async (req, res) => {
+  const { failure_id } = req.params;
+  const {
+    failure_desc,
+    solution,
+    failure_date,
+    status,
+    resolved_date
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE "FailureLog"
+       SET failure_desc = $1, solution = $2, failure_date = $3, status = $4, resolved_date = $5
+       WHERE failure_id = $6
+       RETURNING *`,
+      [failure_desc, solution, failure_date, status, resolved_date, failure_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Failure not found' });
+    }
+
+    res.json({ message: 'Failure updated successfully', failure: result.rows[0] });
+  } catch (err) {
+    console.error('Error updating failure:', err);
+    res.status(500).json({ message: 'Error updating failure' });
+  }
+});
+
+// Delete failure
+router.delete('/failure/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      `DELETE FROM "FailureLog" WHERE failure_id = $1 RETURNING *`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Failure not found' });
+    }
+
+    res.json({ message: 'Failure deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting failure:', err);
+    res.status(500).json({ message: 'Error deleting failure' });
+  }
+});
+
 router.get('/failure/:id', async (req, res) => {
   const { id } = req.params;
   
@@ -1197,6 +1281,8 @@ router.get('/failure/:id', async (req, res) => {
     res.status(500).json({ message: 'Error fetching machine details' });
   }
 });
+
+
 
 
 //normalize the start date and end date 
