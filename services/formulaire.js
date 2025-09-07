@@ -1411,29 +1411,42 @@ await pool.query(`
 router.get('/maintenance', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT 
-        pm.maintenance_id AS id,
-        pm.task_name,
-        pm.start_date,
-        pm.end_date,
-        pm.maintenance_type,
-        pm.task_description,
-        pm.completed_date,
-        pm.assigned_to,
-        pm.creator,
-        pm.task_status,
-        pm.machine_id,
-        ms.repeat_kind AS recurrence,
-        ms.interval,
-        ms.weekdays,
-        ms.monthday AS monthly_day,
-        ms.week_of_month AS monthly_ordinal,
-        ms.weekday AS monthly_weekday,
-        ms.until AS recurrence_end_date
-      FROM "PreventiveMaintenance" pm
-      LEFT JOIN "Maintenance_schedule" ms
-      ON pm.maintenance_id = ms.maintenance_id
-      ORDER BY pm.start_date DESC
+    SELECT 
+  pm.maintenance_id AS id,
+  pm.task_name,
+  pm.start_date,
+  pm.end_date,
+  pm.maintenance_type,
+  pm.task_description,
+  pm.completed_date,
+  pm.assigned_to,
+  pm.creator,
+  pm.task_status,
+  pm.machine_id,
+  ms.repeat_kind AS recurrence,
+  ms.interval,
+  ms.weekdays,
+
+  -- Monthly (both modes)
+  ms.monthday        AS monthly_day,
+  ms.week_of_month   AS monthly_ordinal,  -- number: 1..4, -1
+  ms.weekday         AS monthly_weekday,  -- 0..6 (Sun..Sat)
+
+  -- IMPORTANT: include this (so we know whether it's nth-weekday or day-of-month)
+  ms.pattern_variant,
+
+  -- Yearly (both modes) - stored in the same columns in your table
+  ms.month           AS yearly_month,     -- 1..12
+  ms.monthday        AS yearly_day,       -- 1..31
+  ms.week_of_month   AS yearly_ordinal,   -- 1..4, -1
+  ms.weekday         AS yearly_weekday,   -- 0..6
+
+  ms.until           AS recurrence_end_date
+FROM "PreventiveMaintenance" pm
+LEFT JOIN "Maintenance_schedule" ms
+  ON pm.maintenance_id = ms.maintenance_id
+ORDER BY pm.start_date DESC;
+
     `);
 
     const events = [];
