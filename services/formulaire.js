@@ -1367,7 +1367,7 @@ let week_of_month = null;
 let weekday = null;
 let month = null;
 let monthday = null;
-let pattern_variant = null;
+let pattern_variant = 'standard';
 
 // Monthly mapping
 if (recurrence === 'monthly') {
