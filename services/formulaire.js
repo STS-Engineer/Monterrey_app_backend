@@ -169,7 +169,7 @@ router.get("/machines/:machine_id/qrcode", async (req, res) => {
     }
 
     // Frontend URL for details page
-    const machineUrl = `http://localhost:3000/machine/${machine_id}`;
+    const machineUrl = `https://machine-backend.azurewebsites.net/machine/${machine_id}`;
 
     // Generate QR code as base64
     const qrCode = await QRCode.toDataURL(machineUrl);
