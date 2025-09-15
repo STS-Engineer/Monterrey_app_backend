@@ -7,7 +7,7 @@ const multer = require('multer');
 const path = require('path');
 const { getIo, getConnectedUsers } = require('../socketManager');
 const nodemailer = require('nodemailer');
-
+const QRCode = require("qrcode");
 
 // Middleware to authenticate and extract user from JWT
 const authenticate = (req, res, next) => {
@@ -146,6 +146,40 @@ router.post('/login', async (req, res) => {
   }
 });
 
+
+//QR Code generatort method 
+router.get("/machines/:machine_id/qrcode", async (req, res) => {
+  let { machine_id } = req.params;
+
+  // Ensure machine_id is an integer
+  machine_id = parseInt(machine_id, 10);
+  if (isNaN(machine_id)) {
+    return res.status(400).json({ message: "Invalid machine_id" });
+  }
+
+  try {
+    // Check if machine exists
+    const result = await pool.query(
+      `SELECT * FROM "Machines" WHERE machine_id = $1`,
+      [machine_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Machine not found" });
+    }
+
+    // Frontend URL for details page
+    const machineUrl = `http://localhost:3000/machine/${machine_id}`;
+
+    // Generate QR code as base64
+    const qrCode = await QRCode.toDataURL(machineUrl);
+
+    res.json({ qrCode });
+  } catch (error) {
+    console.error("Error generating QR code:", error);
+    res.status(500).json({ message: "Error generating QR code" });
+  }
+});
 
 
 // Upload endpoint
