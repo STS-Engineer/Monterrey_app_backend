@@ -44,26 +44,7 @@ const storage = multer.diskStorage({
 
 // File filter to allow only specific types
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = [
-    'image/png',
-    'image/jpeg',
-    'image/jpg',
-    'video/mp4',
-    'video/mpeg',
-    'video/avi',
-    'video/quicktime',
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-    'application/vnd.ms-excel', // .xls or sometimes .csv
-    'text/csv', // CSV from some sources
-    'application/csv', // CSV from other tools
-  ];
-
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error(`Unsupported file type: ${file.mimetype}`), false);
-  }
+  cb(null, true); // Accept all files
 };
 
 
