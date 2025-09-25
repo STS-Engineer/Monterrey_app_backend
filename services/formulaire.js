@@ -216,7 +216,7 @@ router.post(
       } = req.body;
 
       const getFile = (field) =>
-        req.files && req.files[field] ? req.files[field][0].filename : "";
+        req.files && req.files[field] ? req.files[field][0].filename : null;
 
       const machineimagefile = getFile("machineimagefile");
       const files_3d = getFile("files_3d");
