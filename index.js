@@ -13,7 +13,16 @@ const server = http.createServer(app);
 // Middleware
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
-app.use(cors({ origin: 'https://machinery-system.azurewebsites.net' }));
+app.use(cors({
+  origin: 'https://machinery-system.azurewebsites.net',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
+
+// Handle preflight requests
+app.options('*', cors());
+
 app.use(express.json());
 
 // Routes
