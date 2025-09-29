@@ -8,6 +8,7 @@ module.exports = function(io, connectedUsers) {
     const { executorId } = req.params;
 
     try {
+      
   const result = await pool.query(
   `SELECT pm.*, 
           mtr.feedback, 
@@ -16,22 +17,13 @@ module.exports = function(io, connectedUsers) {
    LEFT JOIN "Maintenance_task_reviews" mtr 
      ON pm.maintenance_id = mtr.maintenance_id
    WHERE pm.assigned_to = $1 
-     AND pm.task_status IN ('Pending Review','Accepted','Rejected', 'Completed')
+     AND pm.task_status IN ('In progress','Pending Review','Accepted','Rejected', 'Completed')
    ORDER BY pm.start_date DESC`,
   [executorId]
 );
 
-
-      res.json(result.rows);
-
-      // Optional: notify executor their inbox was fetched
-      const socketId = connectedUsers[executorId];
-      if (socketId) {
-        io.to(socketId).emit('inboxFetched', {
-          message: 'Inbox tasks fetched',
-          tasks: result.rows,
-        });
-      }
+   res.json(result.rows);
+    
 
     } catch (err) {
       console.error('Error fetching executor inbox:', err);
