@@ -13,7 +13,7 @@ const server = http.createServer(app);
 // Middleware
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
-app.use(cors({ origin: 'https://machinery-system.azurewebsites.net' }));
+app.use(cors({ origin: 'http://localhost:5173' }));
 app.use(express.json());
 
 // Routes
@@ -21,11 +21,12 @@ app.use('/ajouter', prodformrouter);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // If tasks and inbox routers no longer depend on sockets, just import normally
-const tasksRouter = require('./services/tasks');
+const tasksRouter = require('./services/tasks')(null, null);
 app.use('/api/tasks', tasksRouter);
 
-const inboxRouter = require('./services/inbox');
+const inboxRouter = require('./services/inbox')(null, null);
 app.use('/api/inbox', inboxRouter);
 
-const PORT = process.env.PORT || 4000;
+
+const PORT = 4000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
