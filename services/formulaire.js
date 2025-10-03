@@ -164,21 +164,23 @@ router.get("/machines/:machine_id/qrcode", async (req, res) => {
 
 
 // Upload endpoint
-router.post(  
-  "/machines", authenticate, 
+router.post(
+  "/machines",
+  authenticate,
   upload.fields([
     { name: "machineimagefile", maxCount: 1 },
     { name: "files_3d", maxCount: 1 },
     { name: "files_2d", maxCount: 1 },
     { name: "spare_parts_list", maxCount: 1 },
-    { name: 'electrical_diagram', maxCount: 1 },
-    { name: 'cpk_data', maxCount: 1 },
-    { name: 'validation_document', maxCount: 1 },
-    { name: 'parameter_studies', maxCount: 1 },
+    { name: "electrical_diagram", maxCount: 1 },
+    { name: "cpk_data", maxCount: 1 },
+    { name: "validation_document", maxCount: 1 },
+    { name: "parameter_studies", maxCount: 1 },
     { name: "plc_program", maxCount: 1 },
     { name: "hmi_program", maxCount: 1 },
     { name: "other_programs", maxCount: 1 },
     { name: "machine_manual", maxCount: 1 },
+    { name: "operation_instruction", maxCount: 1 }, // ✅ NEW FIELD
   ]),
   async (req, res) => {
     try {
@@ -210,9 +212,7 @@ router.post(
         water_temp_unit,
         dust_extraction,
         fume_extraction,
-        user_id
-        
-
+        user_id,
       } = req.body;
 
       const getFile = (field) =>
@@ -230,20 +230,22 @@ router.post(
       const hmi_program = getFile("hmi_program");
       const other_programs = getFile("other_programs");
       const machine_manual = getFile("machine_manual");
+      const operation_instruction = getFile("operation_instruction"); // ✅ NEW FILE
 
-
-   
       await pool.query("BEGIN");
-      console.log('User ID:', user_id); // Verify it's logged correctly
-      // SQL query with 22 placeholders
+      console.log("User ID:", user_id);
+
+      // ✅ Insert into Machines
       const machineResult = await pool.query(
         `INSERT INTO "Machines" 
           (machine_ref,machine_name, brand, model, product_line, production_line, station,
-          machineimagefile, files_3d, files_2d, spare_parts_list,electrical_diagram, plc_program, hmi_program, 
-          other_programs, machine_manual, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
-          cpk_data, production_rate, validation_document, parameter_studies, air_needed, air_pressure,  air_pressure_unit,  voltage, phases, amperage,frequency,  water_cooling, water_temp,water_temp_unit, dust_extraction, fume_extraction) 
+          machineimagefile, files_3d, files_2d, spare_parts_list, electrical_diagram, plc_program, hmi_program, 
+          other_programs, machine_manual, operation_instruction, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
+          cpk_data, production_rate, validation_document, parameter_studies, air_needed, air_pressure, air_pressure_unit, 
+          voltage, phases, amperage, frequency, water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction) 
         VALUES 
-          ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36) 
+          ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 
+           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37) 
         RETURNING machine_id`,
         [
           machine_ref,
@@ -262,6 +264,7 @@ router.post(
           hmi_program,
           other_programs,
           machine_manual,
+          operation_instruction, // ✅ NEW
           consumables,
           fixture_numbers,
           gage_numbers,
@@ -281,27 +284,25 @@ router.post(
           water_temp,
           water_temp_unit,
           dust_extraction,
-          fume_extraction
+          fume_extraction,
         ]
       );
 
       const machine_id = machineResult.rows[0].machine_id;
-      const actiondate = new Date();
-      const parsedUserId = parseInt(user_id, 10); 
+      const parsedUserId = parseInt(user_id, 10);
 
-      //machinehistorique 
-  
+      // ✅ Insert into Machines_Hist
       await pool.query(
         `INSERT INTO "Machines_Hist" 
           (machine_id, machine_ref, machine_name, brand, model, product_line, production_line, station,
           machineimagefile, files_3d, files_2d, spare_parts_list, electrical_diagram, plc_program, hmi_program, 
-          other_programs, machine_manual, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
+          other_programs, machine_manual, operation_instruction, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
           cpk_data, production_rate, validation_document, parameter_studies, action_type, action_date, 
           user_id, air_needed, air_pressure, air_pressure_unit, voltage, phases, amperage, frequency, 
           water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction) 
         VALUES 
           ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)`,
+           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)`,
         [
           machine_id,
           machine_ref,
@@ -320,6 +321,7 @@ router.post(
           hmi_program,
           other_programs,
           machine_manual,
+          operation_instruction, // ✅ NEW
           consumables,
           fixture_numbers,
           gage_numbers,
@@ -328,9 +330,9 @@ router.post(
           production_rate,
           validation_document,
           parameter_studies,
-          "CREATE",  // action_type
-          new Date(), // action_date
-          parsedUserId, 
+          "CREATE",
+          new Date(),
+          parsedUserId,
           air_needed,
           air_pressure,
           air_pressure_unit,
@@ -345,28 +347,14 @@ router.post(
           fume_extraction,
         ]
       );
-      
-      
 
-
-// const insertedProductId = productResult.rows[0].product_id;
-
-// // 2. Insert into MachineProducts
-// await pool.query(
-//   `INSERT INTO "MachineProducts" (machine_id, product_id)
-//    VALUES ($1, $2)`,
-//   [machine_id, insertedProductId]
-// );
-      // Commit transaction
       await pool.query("COMMIT");
 
-      // Send response with the created machine ID
       res.status(201).json({
         message: "Machine created successfully",
         machine_id,
       });
     } catch (error) {
-      // Rollback the transaction if an error occurs
       await pool.query("ROLLBACK");
       console.error("Error creating machine:", error);
       res.status(500).json({ message: "Error creating machine" });
