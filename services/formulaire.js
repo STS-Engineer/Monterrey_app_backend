@@ -1173,32 +1173,39 @@ router.post('/failure', async (req, res) => {
     let executor = null;
 
     if (role === "MANAGER") {
-      creator = user_id; // manager logs failure
+      creator = user_id;
+      executor = user_id; // ✅ fix null executor
     } else if (role === "EXECUTOR") {
       executor = user_id;
 
-      // find manager for this executor
       const teamResult = await pool.query(
-        `SELECT manager_id 
-         FROM "TeamAssignments" 
-         WHERE executor_id = $1`,
+        `SELECT manager_id FROM "TeamAssignments" WHERE executor_id = $1`,
         [executor]
       );
-
       if (teamResult.rows.length === 0) {
         return res.status(400).json({ message: 'Executor not assigned to any manager' });
       }
-
-      creator = teamResult.rows[0].manager_id; // assign manager as creator
+      creator = teamResult.rows[0].manager_id;
     }
 
-    // 2. Insert failure log
+    // ✅ normalize status
+    let finalStatus = status;
+    if (!["Open", "Resolved", "Cancelled"].includes(finalStatus)) {
+      finalStatus = "Open";
+    }
+
+    // ✅ resolved_date rule
+    let finalResolvedDate = null;
+    if (finalStatus === "Resolved") {
+      finalResolvedDate = resolved_date || new Date();
+    }
+
     const failureResult = await pool.query(
       `INSERT INTO "FailureLog"
        (machine_id, failure_desc, solution, failure_date, status, resolved_date, executor, creator)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       VALUES ($1, $2, $3, COALESCE($4, CURRENT_TIMESTAMP), $5, $6, $7, $8)
        RETURNING *`,
-      [machineId, failure_desc, solution, failure_date, status, resolved_date, executor, creator]
+      [machineId, failure_desc, solution, failure_date, finalStatus, finalResolvedDate, executor, creator]
     );
 
     res.status(201).json({
@@ -1206,8 +1213,8 @@ router.post('/failure', async (req, res) => {
       failure: failureResult.rows[0]
     });
   } catch (err) {
-    console.error('Error inserting failure log:', err);
-    res.status(500).json({ message: 'Error inserting failure log' });
+    console.error('Error inserting failure log:', err.message);
+    res.status(500).json({ message: 'Error inserting failure log', error: err.message });
   }
 });
 
