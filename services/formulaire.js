@@ -1507,63 +1507,39 @@ await pool.query(`
 router.get('/maintenance', async (req, res) => {
   try {
     const result = await pool.query(`
-    SELECT 
-  pm.maintenance_id AS id,
-  pm.task_name,
-  pm.start_date,
-  pm.end_date,
-  pm.maintenance_type,
-  pm.task_description,
-  pm.completed_date,
-  pm.assigned_to,
-  pm.creator,
-  pm.task_status,
-  pm.machine_id,
-  ms.repeat_kind AS recurrence,
-  ms.interval,
-  ms.weekdays,
-
-  -- Monthly (both modes)
-  ms.monthday        AS monthly_day,
-  ms.week_of_month   AS monthly_ordinal,  -- number: 1..4, -1
-  ms.weekday         AS monthly_weekday,  -- 0..6 (Sun..Sat)
-
-  -- IMPORTANT: include this (so we know whether it's nth-weekday or day-of-month)
-  ms.pattern_variant,
-
-  -- Yearly (both modes) - stored in the same columns in your table
-  ms.month           AS yearly_month,     -- 1..12
-  ms.monthday        AS yearly_day,       -- 1..31
-  ms.week_of_month   AS yearly_ordinal,   -- 1..4, -1
-  ms.weekday         AS yearly_weekday,   -- 0..6
-
-  ms.until           AS recurrence_end_date
-FROM "PreventiveMaintenance" pm
-LEFT JOIN "Maintenance_schedule" ms
-  ON pm.maintenance_id = ms.maintenance_id
-ORDER BY pm.start_date DESC;
-
+      SELECT 
+        pm.maintenance_id AS id,
+        pm.task_name,
+        pm.start_date,
+        pm.end_date,
+        pm.maintenance_type,
+        pm.task_description,
+        pm.completed_date,
+        pm.assigned_to,
+        pm.creator,
+        pm.task_status,
+        pm.machine_id,
+        ms.repeat_kind AS recurrence,
+        ms.interval,
+        ms.weekdays,
+        ms.monthday AS monthly_day,
+        ms.week_of_month AS monthly_ordinal,
+        ms.weekday AS monthly_weekday,
+        ms.pattern_variant,
+        ms.month AS yearly_month,
+        ms.until AS recurrence_end_date
+      FROM "PreventiveMaintenance" pm
+      LEFT JOIN "Maintenance_schedule" ms
+        ON pm.maintenance_id = ms.maintenance_id
+      ORDER BY pm.start_date DESC
     `);
 
-    const events = [];
-
-    const ordinalMapNumToStr = { 1: 'first', 2: 'second', 3: 'third', 4: 'fourth', '-1': 'last' };
-
-
-    result.rows.forEach(event => {
-      const startDate = new Date(event.start_date);
-      const endDate = new Date(event.end_date);
-      const until = event.recurrence_end_date ? new Date(event.recurrence_end_date) : null;
-
-      // Add the base event
-      events.push({
-        ...event,
-        start_date: startDate.toISOString(),
-        end_date: endDate.toISOString(),
-      });
-
- 
-    });
+    const events = result.rows.map(event => ({
+      ...event,
+      start_date: event.start_date.toISOString(),
+      end_date: event.end_date.toISOString(),
+      recurrence_end_date: event.recurrence_end_date ? event.recurrence_end_date.toISOString() : null
+    }));
 
     res.status(200).json(events);
   } catch (err) {
@@ -1571,6 +1547,7 @@ ORDER BY pm.start_date DESC;
     res.status(500).json({ message: "Error fetching maintenance events" });
   }
 });
+
 
 
 router.get('/maintenancee', async (req, res) => {
@@ -1584,41 +1561,69 @@ router.get('/maintenancee', async (req, res) => {
     let result;
 
     if (role === 'ADMIN') {
-      // Admin gets all maintenance
+      // Admin gets all maintenance with recurrence data
       result = await pool.query(`
         SELECT 
-          maintenance_id AS id, 
-          task_name, 
-          start_date,
-          end_date,
-          maintenance_type,
-          task_description,
-          completed_date,
-          assigned_to,
-          creator,
-          task_status,
-          machine_id
-        FROM "PreventiveMaintenance"
-        ORDER BY start_date DESC
+          pm.maintenance_id AS id, 
+          pm.task_name, 
+          pm.start_date,
+          pm.end_date,
+          pm.maintenance_type,
+          pm.task_description,
+          pm.completed_date,
+          pm.assigned_to,
+          pm.creator,
+          pm.task_status,
+          pm.machine_id,
+          ms.repeat_kind AS recurrence,
+          ms.interval,
+          ms.weekdays,
+          ms.monthday AS monthly_day,
+          ms.week_of_month AS monthly_ordinal,
+          ms.weekday AS monthly_weekday,
+          ms.pattern_variant,
+          ms.month AS yearly_month,
+          ms.monthday AS yearly_day,
+          ms.week_of_month AS yearly_ordinal,
+          ms.weekday AS yearly_weekday,
+          ms.until AS recurrence_end_date
+        FROM "PreventiveMaintenance" pm
+        LEFT JOIN "Maintenance_schedule" ms
+          ON pm.maintenance_id = ms.maintenance_id
+        ORDER BY pm.start_date DESC
       `);
     } else {
-      // Other users get only assigned or created maintenance
+      // Other users get only assigned or created maintenance with recurrence data
       result = await pool.query(`
         SELECT 
-          maintenance_id AS id, 
-          task_name, 
-          start_date,
-          end_date,
-          maintenance_type,
-          task_description,
-          completed_date,
-          assigned_to,
-          creator,
-          task_status,
-          machine_id
-        FROM "PreventiveMaintenance"
-        WHERE assigned_to = $1 OR creator = $1
-        ORDER BY start_date DESC
+          pm.maintenance_id AS id, 
+          pm.task_name, 
+          pm.start_date,
+          pm.end_date,
+          pm.maintenance_type,
+          pm.task_description,
+          pm.completed_date,
+          pm.assigned_to,
+          pm.creator,
+          pm.task_status,
+          pm.machine_id,
+          ms.repeat_kind AS recurrence,
+          ms.interval,
+          ms.weekdays,
+          ms.monthday AS monthly_day,
+          ms.week_of_month AS monthly_ordinal,
+          ms.weekday AS monthly_weekday,
+          ms.pattern_variant,
+          ms.month AS yearly_month,
+          ms.monthday AS yearly_day,
+          ms.week_of_month AS yearly_ordinal,
+          ms.weekday AS yearly_weekday,
+          ms.until AS recurrence_end_date
+        FROM "PreventiveMaintenance" pm
+        LEFT JOIN "Maintenance_schedule" ms
+          ON pm.maintenance_id = ms.maintenance_id
+        WHERE pm.assigned_to = $1 OR pm.creator = $1
+        ORDER BY pm.start_date DESC
       `, [userId]);
     }
 
@@ -1626,6 +1631,9 @@ router.get('/maintenancee', async (req, res) => {
       ...event,
       start: event.start_date,
       end: event.end_date,
+      start_date: event.start_date.toISOString(),
+      end_date: event.end_date.toISOString(),
+      recurrence_end_date: event.recurrence_end_date ? event.recurrence_end_date.toISOString() : null
     }));
 
     res.status(200).json(events);
@@ -1634,7 +1642,6 @@ router.get('/maintenancee', async (req, res) => {
     res.status(500).json({ message: "Error fetching maintenance events" });
   }
 });
-
 
 //historymodification
 router.get('/maintenance/:id/history', async (req, res) => {
@@ -1732,13 +1739,14 @@ router.put('/maintenance/:id', async (req, res) => {
     creator,
     start_date,
     end_date,
-    user_id
+    user_id,
+    recurrence
   } = req.body;
 
   try {
     await pool.query('BEGIN');
 
-    // Step 1: Fetch the previous data
+    // Fetch the previous data
     const previousResult = await pool.query(
       `SELECT * FROM "PreventiveMaintenance" WHERE maintenance_id = $1`,
       [id]
@@ -1750,16 +1758,13 @@ router.put('/maintenance/:id', async (req, res) => {
 
     const previous = previousResult.rows[0];
 
-    // Step 2: Insert the previous data into the history table
+    // Insert the previous data into the history table
     await pool.query(
-      `
-      INSERT INTO "PreventiveMaintenance_Hist" 
+      `INSERT INTO "PreventiveMaintenance_Hist" 
         (maintenance_id, machine_id, maintenance_type, task_name, task_description, 
          start_date, end_date, completed_date, task_status, assigned_to, 
          creator, creation_date, action_type, action_date, user_id) 
-      VALUES 
-        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-      `,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         id,
         previous.machine_id,
@@ -1779,23 +1784,21 @@ router.put('/maintenance/:id', async (req, res) => {
       ]
     );
 
-    // Step 3: Perform the actual update
+    // Perform the actual update on PreventiveMaintenance
     await pool.query(
-      `
-      UPDATE "PreventiveMaintenance"
-      SET 
-        maintenance_type = $1,
-        task_name = $2,
-        task_description = $3,
-        completed_date = $4,
-        task_status = $5,
-        assigned_to = $6,
-        creator = $7,
-        creation_date = $8,
-        start_date = $9,
-        end_date = $10
-      WHERE maintenance_id = $11
-      `,
+      `UPDATE "PreventiveMaintenance"
+       SET 
+         maintenance_type = $1,
+         task_name = $2,
+         task_description = $3,
+         completed_date = $4,
+         task_status = $5,
+         assigned_to = $6,
+         creator = $7,
+         creation_date = $8,
+         start_date = $9,
+         end_date = $10
+       WHERE maintenance_id = $11`,
       [
         maintenance_type,
         task_name,
@@ -1804,14 +1807,211 @@ router.put('/maintenance/:id', async (req, res) => {
         task_status || 'In progress',
         assigned_to,
         creator,
-        new Date(), // updated creation_date (optionally keep original)
+        new Date(),
         start_date,
         end_date,
         id
       ]
     );
 
-    // Step 4: Fetch updated row and insert the new state into history
+    // Update Maintenance_schedule table with recurrence data
+    if (recurrence) {
+      const {
+        frequency,
+        interval,
+        weekdays,
+        monthly_day,
+        monthly_ordinal,
+        monthly_weekday,
+        yearly_mode,
+        yearly_day,
+        yearly_month,
+        yearly_ordinal,
+        yearly_weekday,
+        recurrence_end_date
+      } = recurrence;
+
+      // Map recurrence data to Maintenance_schedule columns
+      const ordinals = { first: 1, second: 2, third: 3, fourth: 4, last: -1 };
+      
+      let week_of_month = null;
+      let weekday = null;
+      let month = null;
+      let monthday = null;
+      let pattern_variant = 'standard';
+      let rrule = null;
+
+      // Handle different frequency types according to constraint
+      if (frequency === 'daily') {
+        pattern_variant = 'standard';
+        monthday = null;
+        week_of_month = null;
+        weekday = null;
+        month = null;
+      }
+      else if (frequency === 'weekly') {
+        pattern_variant = 'standard';
+        monthday = null;
+        week_of_month = null;
+        weekday = null;
+        month = null;
+      }
+      else if (frequency === 'monthly') {
+        if (monthly_ordinal && monthly_weekday !== undefined && monthly_weekday !== null) {
+          // Monthly nth weekday pattern (e.g., "Second Tuesday")
+          pattern_variant = 'monthly_nth';
+          week_of_month = ordinals[monthly_ordinal.toLowerCase()] || null;
+          weekday = monthly_weekday;
+          monthday = null; // MUST be null for monthly_nth variant
+          month = null;
+        } else if (monthly_day) {
+          // Monthly day-of-month pattern (e.g., "Every 15th")
+          pattern_variant = 'standard';
+          monthday = monthly_day;
+          week_of_month = null; // MUST be null for standard variant
+          weekday = null; // MUST be null for standard variant
+          month = null;
+        } else {
+          // Default to day 1 if nothing specified
+          pattern_variant = 'standard';
+          monthday = 1;
+          week_of_month = null;
+          weekday = null;
+          month = null;
+        }
+      }
+    // In your backend PUT endpoint, update the yearly section:
+// In your backend PUT endpoint, update the yearly section:
+// In your backend PUT endpoint, fix the yearly day mode:
+else if (frequency === 'yearly') {
+  console.log('Processing yearly recurrence - Input:', {
+    yearly_mode,
+    yearly_month,
+    yearly_day,
+    yearly_ordinal,
+    yearly_weekday
+  });
+
+  if (yearly_mode === 'day') {
+    // Yearly specific date pattern
+    pattern_variant = 'standard';
+    // Frontend sends 0-11, database expects 1-12
+    month = (yearly_month !== undefined && yearly_month !== null) ? yearly_month + 1 : 1;
+    
+    // CRITICAL FIX: Use the selected yearly_day, don't fall back to current date
+    monthday = yearly_day;
+    
+    // Validate monthday is a proper number
+    if (monthday === null || monthday === undefined || monthday < 1 || monthday > 31) {
+      console.log('Invalid yearly_day, defaulting to 1');
+      monthday = 1;
+    }
+    
+    week_of_month = null;
+    weekday = null;
+    
+    console.log('Yearly day mode result:', { pattern_variant, month, monthday });
+  } else if (yearly_mode === 'weekday') {
+    // Yearly nth weekday pattern
+    pattern_variant = 'monthly_nth';
+    week_of_month = ordinals[yearly_ordinal?.toLowerCase()] || 1;
+    weekday = (yearly_weekday !== undefined && yearly_weekday !== null) ? yearly_weekday : 1;
+    // Frontend sends 0-11, database expects 1-12
+    month = (yearly_month !== undefined && yearly_month !== null) ? yearly_month + 1 : 1;
+    monthday = null;
+    
+    console.log('Yearly weekday mode result:', { pattern_variant, week_of_month, weekday, month });
+  } else {
+    // Default to specific date pattern if mode not set
+    console.log('Yearly mode not set, defaulting to day mode');
+    pattern_variant = 'standard';
+    month = 1; // January
+    monthday = 1; // Default to day 1
+    week_of_month = null;
+    weekday = null;
+  }
+}
+
+      console.log('Recurrence mapping:', {
+        frequency,
+        pattern_variant,
+        monthday,
+        week_of_month,
+        weekday,
+        month
+      });
+
+      // Check if schedule record exists
+      const scheduleCheck = await pool.query(
+        'SELECT * FROM "Maintenance_schedule" WHERE maintenance_id = $1',
+        [id]
+      );
+
+      if (scheduleCheck.rows.length > 0) {
+        // Update existing schedule
+        await pool.query(`
+          UPDATE "Maintenance_schedule"
+          SET 
+            start_at = $1,
+            end_at = $2,
+            repeat_kind = $3,
+            interval = $4,
+            weekdays = $5,
+            monthday = $6,
+            month = $7,
+            week_of_month = $8,
+            weekday = $9,
+            pattern_variant = $10,
+            until = $11,
+            rrule = $12
+          WHERE maintenance_id = $13
+        `, [
+          start_date,
+          end_date,
+          frequency || 'none',
+          interval || 1,
+          weekdays || null,
+          monthday,
+          month,
+          week_of_month,
+          weekday,
+          pattern_variant,
+          recurrence_end_date,
+          rrule,
+          id
+        ]);
+      } else {
+        // Insert new schedule record
+        await pool.query(`
+          INSERT INTO "Maintenance_schedule"
+          (maintenance_id, start_at, end_at, timezone, repeat_kind, interval, weekdays, monthday, month, week_of_month, weekday, pattern_variant, until, notes, rrule)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        `, [
+          id,
+          start_date,
+          end_date,
+          'Africa/Tunis',
+          frequency || 'none',
+          interval || 1,
+          weekdays || null,
+          monthday,
+          month,
+          week_of_month,
+          weekday,
+          pattern_variant,
+          recurrence_end_date,
+          task_description,
+          rrule
+        ]);
+      }
+    } else {
+      // If no recurrence data, ensure schedule record is removed or set to 'none'
+      await pool.query(`
+        DELETE FROM "Maintenance_schedule" WHERE maintenance_id = $1
+      `, [id]);
+    }
+
+    // Fetch updated row and insert the new state into history
     const updatedResult = await pool.query(
       `SELECT * FROM "PreventiveMaintenance" WHERE maintenance_id = $1`,
       [id]
@@ -1820,14 +2020,11 @@ router.put('/maintenance/:id', async (req, res) => {
     const updated = updatedResult.rows[0];
 
     await pool.query(
-      `
-      INSERT INTO "PreventiveMaintenance_Hist" 
+      `INSERT INTO "PreventiveMaintenance_Hist" 
         (maintenance_id, machine_id, maintenance_type, task_name, task_description, 
          start_date, end_date, completed_date, task_status, assigned_to, 
          creator, creation_date, action_type, action_date, user_id) 
-      VALUES 
-        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-      `,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         id,
         updated.machine_id,
@@ -1853,6 +2050,7 @@ router.put('/maintenance/:id', async (req, res) => {
   } catch (error) {
     await pool.query('ROLLBACK');
     console.error("Error updating maintenance task:", error.message);
+    console.error("Error details:", error);
     res.status(500).json({ message: "Failed to update maintenance task", error: error.message });
   }
 });
