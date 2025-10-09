@@ -1211,7 +1211,7 @@ router.post('/failure', async (req, res) => {
 router.get('/failures', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT f.failure_id, f.machine_id, m.machine_name, f.failure_desc, f.solution, 
+      `SELECT f.failure_id, f.machine_id, m.machine_name, m.machine_ref,  f.failure_desc, f.solution, 
               f.failure_date, f.status, f.executor, f.creator, f.resolved_date
        FROM "FailureLog" f
        JOIN "Machines" m ON f.machine_id = m.machine_id
@@ -1223,6 +1223,7 @@ router.get('/failures', async (req, res) => {
     res.status(500).json({ message: 'Error fetching failures' });
   }
 });
+
 
 // Update failure
 router.put('/failure/:failure_id', async (req, res) => {
