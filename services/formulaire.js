@@ -1278,20 +1278,27 @@ router.delete('/failure/:id', async (req, res) => {
 
 router.get('/failure/:id', async (req, res) => {
   const { id } = req.params;
-  
+
   try {
-    const result = await pool.query('SELECT * FROM "FacilitiesRequirements" WHERE requirement_id  = $1', [id]);
+    const result = await pool.query(
+      `SELECT f.*, m.machine_name, m.machine_ref
+       FROM "FailureLog" f
+       LEFT JOIN "Machines" m ON f.machine_id = m.machine_id
+       WHERE f.failure_id = $1`,
+      [id]
+    );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Facilities not found' });
+      return res.status(404).json({ message: 'Failure not found' });
     }
 
     res.json(result.rows[0]);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Error fetching machine details' });
+    console.error('Error fetching failure details:', err);
+    res.status(500).json({ message: 'Error fetching failure details' });
   }
 });
+
 
 
 
