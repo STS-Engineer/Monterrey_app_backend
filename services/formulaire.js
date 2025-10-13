@@ -1732,97 +1732,222 @@ router.get('/maintenance/:id/history', async (req, res) => {
 });
 
 
+router.get('/maintenance/:id/history', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `
+      WITH hist AS (
+        SELECT
+          h.action_date,
+          h.action_type,
+          h.user_id,
+          u.email AS modified_by,
+          
+          -- Main fields
+          h.machine_id,
+          h.maintenance_type,
+          h.task_name,
+          h.task_description,
+          h.start_date,
+          h.end_date,
+          h.completed_date,
+          h.task_status,
+          h.assigned_to,
+          h.creator,
+          
+          -- Recurrence fields
+          h.frequency,
+          h."interval",
+          h.weekdays,
+          h.monthly_day,
+          h.monthly_ordinal,
+          h.monthly_weekday,
+          h.yearly_month,
+          h.recurrence_end_date,
 
-router.put('/maintenance/:id', async (req, res) => {
+          -- Previous values for ALL fields (window)
+          LAG(h.machine_id)           OVER (ORDER BY h.action_date) AS prev_machine_id,
+          LAG(h.maintenance_type)     OVER (ORDER BY h.action_date) AS prev_maintenance_type,
+          LAG(h.task_name)            OVER (ORDER BY h.action_date) AS prev_task_name,
+          LAG(h.task_description)     OVER (ORDER BY h.action_date) AS prev_task_description,
+          LAG(h.start_date)           OVER (ORDER BY h.action_date) AS prev_start_date,
+          LAG(h.end_date)             OVER (ORDER BY h.action_date) AS prev_end_date,
+          LAG(h.completed_date)       OVER (ORDER BY h.action_date) AS prev_completed_date,
+          LAG(h.task_status)          OVER (ORDER BY h.action_date) AS prev_task_status,
+          LAG(h.assigned_to)          OVER (ORDER BY h.action_date) AS prev_assigned_to,
+          LAG(h.creator)              OVER (ORDER BY h.action_date) AS prev_creator,
+          
+          LAG(h.frequency)            OVER (ORDER BY h.action_date) AS prev_frequency,
+          LAG(h."interval")           OVER (ORDER BY h.action_date) AS prev_interval,
+          LAG(h.weekdays)             OVER (ORDER BY h.action_date) AS prev_weekdays,
+          LAG(h.monthly_day)          OVER (ORDER BY h.action_date) AS prev_monthly_day,
+          LAG(h.monthly_ordinal)      OVER (ORDER BY h.action_date) AS prev_monthly_ordinal,
+          LAG(h.monthly_weekday)      OVER (ORDER BY h.action_date) AS prev_monthly_weekday,
+          LAG(h.yearly_month)         OVER (ORDER BY h.action_date) AS prev_yearly_month,
+          LAG(h.recurrence_end_date)  OVER (ORDER BY h.action_date) AS prev_recurrence_end_date
+        FROM public."PreventiveMaintenance_Hist" h
+        JOIN public."User" u ON u.user_id = h.user_id
+        WHERE h.maintenance_id = $1
+        ORDER BY h.action_date ASC
+      )
+
+      SELECT *
+      FROM hist
+      WHERE
+        -- Check ALL fields for changes
+        (machine_id          IS DISTINCT FROM prev_machine_id)
+        OR (maintenance_type IS DISTINCT FROM prev_maintenance_type)
+        OR (task_name        IS DISTINCT FROM prev_task_name)
+        OR (task_description IS DISTINCT FROM prev_task_description)
+        OR (start_date       IS DISTINCT FROM prev_start_date)
+        OR (end_date         IS DISTINCT FROM prev_end_date)
+        OR (completed_date   IS DISTINCT FROM prev_completed_date)
+        OR (task_status      IS DISTINCT FROM prev_task_status)
+        OR (assigned_to      IS DISTINCT FROM prev_assigned_to)
+        OR (creator          IS DISTINCT FROM prev_creator)
+        OR (frequency        IS DISTINCT FROM prev_frequency)
+        OR ("interval"       IS DISTINCT FROM prev_interval)
+        OR (weekdays         IS DISTINCT FROM prev_weekdays)
+        OR (monthly_day      IS DISTINCT FROM prev_monthly_day)
+        OR (monthly_ordinal  IS DISTINCT FROM prev_monthly_ordinal)
+        OR (monthly_weekday  IS DISTINCT FROM prev_monthly_weekday)
+        OR (yearly_month     IS DISTINCT FROM prev_yearly_month)
+        OR (recurrence_end_date IS DISTINCT FROM prev_recurrence_end_date)
+      ORDER BY action_date DESC;
+      `,
+      [req.params.id]
+    );
+
+    console.log(`Found ${rows.length} history records for maintenance ${req.params.id}`);
+
+    // Transform results into change-based history
+    const history = rows.map(r => {
+      const changes = {};
+
+      const cmp = (oldVal, newVal, key) => {
+        const normalize = (v, field) => {
+          if (v == null) return null;
+          if (field === 'weekdays' && Array.isArray(v)) return [...v].sort((a, b) => a - b);
+          return v;
+        };
+        const oldN = normalize(oldVal, key);
+        const newN = normalize(newVal, key);
+        if (JSON.stringify(oldN) !== JSON.stringify(newN)) {
+          changes[key] = { old: oldN, new: newN };
+        }
+      };
+
+      // Compare ALL fields
+      const fields = [
+        // Main fields
+        'machine_id',
+        'maintenance_type', 
+        'task_name',
+        'task_description',
+        'start_date',
+        'end_date',
+        'completed_date',
+        'task_status',
+        'assigned_to',
+        'creator',
+        
+        // Recurrence fields
+        'frequency',
+        'interval',
+        'weekdays',
+        'monthly_day',
+        'monthly_ordinal',
+        'monthly_weekday',
+        'yearly_month',
+        'recurrence_end_date'
+      ];
+
+      fields.forEach(k => cmp(r[`prev_${k}`], r[k], k));
+
+      return {
+        action_date: r.action_date,
+        modified_by: r.modified_by,
+        changes
+      };
+    }).filter(h => Object.keys(h.changes).length > 0);
+
+    console.log(`Returning ${history.length} filtered history records with changes`);
+    return res.json(history);
+  } catch (err) {
+    console.error('Error fetching history:', err);
+    res.status(500).json({ message: 'Error fetching history' });
+  }
+});
+
+
+
+router.put("/maintenance/:id", async (req, res) => {
   const { id } = req.params;
-  console.log('Maintenance ID to update:', id);
-
   const {
+    machine_id,
     maintenance_type,
     task_name,
     task_description,
+    start_date,
+    end_date,
     completed_date,
     task_status,
     assigned_to,
     creator,
-    start_date,
-    end_date,
     user_id,
-    recurrence
+    recurrence,
   } = req.body;
 
-  try {
-    await pool.query('BEGIN');
+  console.log(`Updating maintenance ${id}`, { 
+    machine_id, maintenance_type, task_name, task_status, assigned_to,
+    recurrence: recurrence ? 'present' : 'absent' 
+  });
 
-    // Fetch the previous data
-    const previousResult = await pool.query(
+  try {
+    // --- Step 1: Get the old state before update ---
+    const oldResult = await pool.query(
       `SELECT * FROM "PreventiveMaintenance" WHERE maintenance_id = $1`,
       [id]
     );
+    const oldData = oldResult.rows[0];
 
-    if (previousResult.rows.length === 0) {
-      throw new Error('Maintenance task not found');
+    if (!oldData) {
+      return res.status(404).json({ message: "Maintenance task not found" });
     }
 
-    const previous = previousResult.rows[0];
-
-    // Insert the previous data into the history table
-    await pool.query(
-      `INSERT INTO "PreventiveMaintenance_Hist" 
-        (maintenance_id, machine_id, maintenance_type, task_name, task_description, 
-         start_date, end_date, completed_date, task_status, assigned_to, 
-         creator, creation_date, action_type, action_date, user_id) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-      [
-        id,
-        previous.machine_id,
-        previous.maintenance_type,
-        previous.task_name,
-        previous.task_description,
-        previous.start_date,
-        previous.end_date,
-        previous.completed_date,
-        previous.task_status,
-        previous.assigned_to,
-        previous.creator,
-        previous.creation_date,
-        'UPDATE',
-        new Date(),
-        user_id
-      ]
-    );
-
-    // Perform the actual update on PreventiveMaintenance
+    // --- Step 2: Update PreventiveMaintenance main table ---
     await pool.query(
       `UPDATE "PreventiveMaintenance"
-       SET 
-         maintenance_type = $1,
-         task_name = $2,
-         task_description = $3,
-         completed_date = $4,
-         task_status = $5,
-         assigned_to = $6,
-         creator = $7,
-         creation_date = $8,
-         start_date = $9,
-         end_date = $10
+       SET machine_id = $1,
+           maintenance_type = $2,
+           task_name = $3,
+           task_description = $4,
+           start_date = $5,
+           end_date = $6,
+           completed_date = $7,
+           task_status = $8,
+           assigned_to = $9,
+           creator = $10
        WHERE maintenance_id = $11`,
       [
+        machine_id,
         maintenance_type,
         task_name,
         task_description,
-        completed_date,
-        task_status || 'In progress',
-        assigned_to,
-        creator,
-        new Date(),
         start_date,
         end_date,
-        id
+        completed_date,
+        task_status,
+        assigned_to,
+        creator,
+        id,
       ]
     );
 
-    // Update Maintenance_schedule table with recurrence data
+    // --- Step 3: Handle recurrence (Maintenance_schedule table) ---
+    let recurrenceData = {};
+    let scheduleChanges = [];
+
     if (recurrence) {
       const {
         frequency,
@@ -1831,237 +1956,206 @@ router.put('/maintenance/:id', async (req, res) => {
         monthly_day,
         monthly_ordinal,
         monthly_weekday,
-        yearly_mode,
-        yearly_day,
         yearly_month,
-        yearly_ordinal,
-        yearly_weekday,
-        recurrence_end_date
+        recurrence_end_date,
       } = recurrence;
 
-      // Map recurrence data to Maintenance_schedule columns
-      const ordinals = { first: 1, second: 2, third: 3, fourth: 4, last: -1 };
-      
-      let week_of_month = null;
-      let weekday = null;
-      let month = null;
-      let monthday = null;
-      let pattern_variant = 'standard';
-      let rrule = null;
-
-      // Handle different frequency types according to constraint
-      if (frequency === 'daily') {
-        pattern_variant = 'standard';
-        monthday = null;
-        week_of_month = null;
-        weekday = null;
-        month = null;
-      }
-      else if (frequency === 'weekly') {
-        pattern_variant = 'standard';
-        monthday = null;
-        week_of_month = null;
-        weekday = null;
-        month = null;
-      }
-      else if (frequency === 'monthly') {
-        if (monthly_ordinal && monthly_weekday !== undefined && monthly_weekday !== null) {
-          // Monthly nth weekday pattern (e.g., "Second Tuesday")
-          pattern_variant = 'monthly_nth';
-          week_of_month = ordinals[monthly_ordinal.toLowerCase()] || null;
-          weekday = monthly_weekday;
-          monthday = null; // MUST be null for monthly_nth variant
-          month = null;
-        } else if (monthly_day) {
-          // Monthly day-of-month pattern (e.g., "Every 15th")
-          pattern_variant = 'standard';
-          monthday = monthly_day;
-          week_of_month = null; // MUST be null for standard variant
-          weekday = null; // MUST be null for standard variant
-          month = null;
-        } else {
-          // Default to day 1 if nothing specified
-          pattern_variant = 'standard';
-          monthday = 1;
-          week_of_month = null;
-          weekday = null;
-          month = null;
-        }
-      }
-    // In your backend PUT endpoint, update the yearly section:
-// In your backend PUT endpoint, update the yearly section:
-// In your backend PUT endpoint, fix the yearly day mode:
-else if (frequency === 'yearly') {
-  console.log('Processing yearly recurrence - Input:', {
-    yearly_mode,
-    yearly_month,
-    yearly_day,
-    yearly_ordinal,
-    yearly_weekday
-  });
-
-  if (yearly_mode === 'day') {
-    // Yearly specific date pattern
-    pattern_variant = 'standard';
-    // Frontend sends 0-11, database expects 1-12
-    month = (yearly_month !== undefined && yearly_month !== null) ? yearly_month + 1 : 1;
-    
-    // CRITICAL FIX: Use the selected yearly_day, don't fall back to current date
-    monthday = yearly_day;
-    
-    // Validate monthday is a proper number
-    if (monthday === null || monthday === undefined || monthday < 1 || monthday > 31) {
-      console.log('Invalid yearly_day, defaulting to 1');
-      monthday = 1;
-    }
-    
-    week_of_month = null;
-    weekday = null;
-    
-    console.log('Yearly day mode result:', { pattern_variant, month, monthday });
-  } else if (yearly_mode === 'weekday') {
-    // Yearly nth weekday pattern
-    pattern_variant = 'monthly_nth';
-    week_of_month = ordinals[yearly_ordinal?.toLowerCase()] || 1;
-    weekday = (yearly_weekday !== undefined && yearly_weekday !== null) ? yearly_weekday : 1;
-    // Frontend sends 0-11, database expects 1-12
-    month = (yearly_month !== undefined && yearly_month !== null) ? yearly_month + 1 : 1;
-    monthday = null;
-    
-    console.log('Yearly weekday mode result:', { pattern_variant, week_of_month, weekday, month });
-  } else {
-    // Default to specific date pattern if mode not set
-    console.log('Yearly mode not set, defaulting to day mode');
-    pattern_variant = 'standard';
-    month = 1; // January
-    monthday = 1; // Default to day 1
-    week_of_month = null;
-    weekday = null;
-  }
-}
-
-      console.log('Recurrence mapping:', {
-        frequency,
-        pattern_variant,
-        monthday,
-        week_of_month,
-        weekday,
-        month
-      });
-
-      // Check if schedule record exists
-      const scheduleCheck = await pool.query(
-        'SELECT * FROM "Maintenance_schedule" WHERE maintenance_id = $1',
+      const existingSchedule = await pool.query(
+        `SELECT * FROM "Maintenance_schedule" WHERE maintenance_id = $1`,
         [id]
       );
 
-      if (scheduleCheck.rows.length > 0) {
-        // Update existing schedule
-        await pool.query(`
-          UPDATE "Maintenance_schedule"
-          SET 
-            start_at = $1,
-            end_at = $2,
-            repeat_kind = $3,
-            interval = $4,
-            weekdays = $5,
-            monthday = $6,
-            month = $7,
-            week_of_month = $8,
-            weekday = $9,
-            pattern_variant = $10,
-            until = $11,
-            rrule = $12
-          WHERE maintenance_id = $13
-        `, [
-          start_date,
-          end_date,
-          frequency || 'none',
-          interval || 1,
-          weekdays || null,
-          monthday,
-          month,
-          week_of_month,
-          weekday,
-          pattern_variant,
-          recurrence_end_date,
-          rrule,
-          id
-        ]);
+      // Map field names between frontend and database
+      const dbFields = {
+        repeat_kind: frequency,
+        interval: interval,
+        weekdays: weekdays,
+        monthday: monthly_day,
+        week_of_month: monthly_ordinal,
+        weekday: monthly_weekday,
+        month: yearly_month,
+        until: recurrence_end_date
+      };
+
+      if (existingSchedule.rowCount > 0) {
+        const oldSchedule = existingSchedule.rows[0];
+        
+        // Check for changes in schedule
+        for (const [dbField, newValue] of Object.entries(dbFields)) {
+          const oldValue = oldSchedule[dbField];
+          if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+            scheduleChanges.push(dbField);
+          }
+        }
+
+        await pool.query(
+          `UPDATE "Maintenance_schedule"
+           SET repeat_kind = $1,
+               interval = $2,
+               weekdays = $3,
+               monthday = $4,
+               week_of_month = $5,
+               weekday = $6,
+               month = $7,
+               until = $8
+           WHERE maintenance_id = $9`,
+          [
+            frequency,
+            interval,
+            weekdays,
+            monthly_day,
+            monthly_ordinal,
+            monthly_weekday,
+            yearly_month,
+            recurrence_end_date,
+            id,
+          ]
+        );
       } else {
-        // Insert new schedule record
-        await pool.query(`
-          INSERT INTO "Maintenance_schedule"
-          (maintenance_id, start_at, end_at, timezone, repeat_kind, interval, weekdays, monthday, month, week_of_month, weekday, pattern_variant, until, notes, rrule)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-        `, [
-          id,
-          start_date,
-          end_date,
-          'Africa/Tunis',
-          frequency || 'none',
-          interval || 1,
-          weekdays || null,
-          monthday,
-          month,
-          week_of_month,
-          weekday,
-          pattern_variant,
-          recurrence_end_date,
-          task_description,
-          rrule
-        ]);
+        // New schedule - all fields are changes
+        scheduleChanges = Object.keys(dbFields);
+        
+        await pool.query(
+          `INSERT INTO "Maintenance_schedule"
+           (maintenance_id, repeat_kind, interval, weekdays, monthday, week_of_month, weekday, month, until)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            id,
+            frequency,
+            interval,
+            weekdays,
+            monthly_day,
+            monthly_ordinal,
+            monthly_weekday,
+            yearly_month,
+            recurrence_end_date,
+          ]
+        );
       }
+
+      recurrenceData = {
+        frequency,
+        interval,
+        weekdays,
+        monthly_day,
+        monthly_ordinal,
+        monthly_weekday,
+        yearly_month,
+        recurrence_end_date,
+      };
     } else {
-      // If no recurrence data, ensure schedule record is removed or set to 'none'
-      await pool.query(`
-        DELETE FROM "Maintenance_schedule" WHERE maintenance_id = $1
-      `, [id]);
+      // If no recurrence data, delete existing schedule if it exists
+      const existingSchedule = await pool.query(
+        `SELECT * FROM "Maintenance_schedule" WHERE maintenance_id = $1`,
+        [id]
+      );
+      
+      if (existingSchedule.rowCount > 0) {
+        scheduleChanges = ['recurrence_removed'];
+        await pool.query(
+          `DELETE FROM "Maintenance_schedule" WHERE maintenance_id = $1`,
+          [id]
+        );
+      }
     }
 
-    // Fetch updated row and insert the new state into history
-    const updatedResult = await pool.query(
+    // --- Step 4: Get the new state after update ---
+    const newResult = await pool.query(
       `SELECT * FROM "PreventiveMaintenance" WHERE maintenance_id = $1`,
       [id]
     );
+    const newData = newResult.rows[0];
 
-    const updated = updatedResult.rows[0];
+    // --- Step 5: Compare old vs new to detect changes ---
+    const changedFields = [];
+    for (const key in newData) {
+      if (
+        key !== "creation_date" &&
+        key !== "maintenance_id" &&
+        JSON.stringify(newData[key]) !== JSON.stringify(oldData[key])
+      ) {
+        changedFields.push(key);
+      }
+    }
 
-    await pool.query(
-      `INSERT INTO "PreventiveMaintenance_Hist" 
-        (maintenance_id, machine_id, maintenance_type, task_name, task_description, 
-         start_date, end_date, completed_date, task_status, assigned_to, 
-         creator, creation_date, action_type, action_date, user_id) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-      [
-        id,
-        updated.machine_id,
-        updated.maintenance_type,
-        updated.task_name,
-        updated.task_description,
-        updated.start_date,
-        updated.end_date,
-        updated.completed_date,
-        updated.task_status,
-        updated.assigned_to,
-        updated.creator,
-        updated.creation_date,
-        'UPDATE',
-        new Date(),
-        user_id
-      ]
-    );
+    // Add recurrence field changes
+    if (scheduleChanges.length > 0) {
+      // Map database field names back to frontend field names
+      const fieldMapping = {
+        'repeat_kind': 'frequency',
+        'interval': 'interval',
+        'weekdays': 'weekdays',
+        'monthday': 'monthly_day',
+        'week_of_month': 'monthly_ordinal',
+        'weekday': 'monthly_weekday',
+        'month': 'yearly_month',
+        'until': 'recurrence_end_date',
+        'recurrence_removed': 'recurrence_removed'
+      };
 
-    await pool.query('COMMIT');
-    res.status(200).json({ message: "Maintenance task updated successfully" });
+      scheduleChanges.forEach(dbField => {
+        const frontendField = fieldMapping[dbField];
+        if (frontendField && !changedFields.includes(frontendField)) {
+          changedFields.push(frontendField);
+        }
+      });
+    }
 
-  } catch (error) {
-    await pool.query('ROLLBACK');
-    console.error("Error updating maintenance task:", error.message);
-    console.error("Error details:", error);
-    res.status(500).json({ message: "Failed to update maintenance task", error: error.message });
+    console.log('Detected changes:', changedFields);
+
+    // --- Step 6: Save new version to history if something changed ---
+    if (changedFields.length > 0) {
+      console.log('Saving history record with changes:', changedFields);
+      
+      await pool.query(
+        `INSERT INTO "PreventiveMaintenance_Hist" 
+         (maintenance_id, machine_id, maintenance_type, task_name, task_description, 
+          start_date, end_date, completed_date, task_status, assigned_to, 
+          creator, creation_date, action_type, action_date, user_id,
+          frequency, "interval", weekdays, monthly_day, monthly_ordinal, monthly_weekday, yearly_month, recurrence_end_date)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+                 $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+        [
+          newData.maintenance_id,
+          newData.machine_id,
+          newData.maintenance_type,
+          newData.task_name,
+          newData.task_description,
+          newData.start_date,
+          newData.end_date,
+          newData.completed_date,
+          newData.task_status,
+          newData.assigned_to,
+          newData.creator,
+          newData.creation_date,
+          "UPDATE",
+          new Date(),
+          user_id,
+          recurrenceData.frequency || null,
+          recurrenceData.interval || null,
+          recurrenceData.weekdays || null,
+          recurrenceData.monthly_day || null,
+          recurrenceData.monthly_ordinal || null,
+          recurrenceData.monthly_weekday || null,
+          recurrenceData.yearly_month || null,
+          recurrenceData.recurrence_end_date || null,
+        ]
+      );
+    }
+
+    res.json({
+      message:
+        changedFields.length > 0
+          ? "Maintenance updated and history recorded"
+          : "Maintenance updated (no changes detected)",
+      changedFields,
+    });
+  } catch (err) {
+    console.error("Error updating maintenance:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
+
 
 router.delete('/maintenance/:maintenance_id', async (req, res) => {
   const { maintenance_id } = req.params;
