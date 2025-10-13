@@ -1654,86 +1654,6 @@ router.get('/maintenancee', async (req, res) => {
 //historymodification
 router.get('/maintenance/:id/history', async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT 
-        h.action_date,
-        h.action_type,
-        h.machine_id,
-        h.maintenance_type,
-        h.task_name,
-        h.task_description,
-        h.start_date,
-        h.end_date,
-        h.completed_date,
-        h.task_status,
-        h.assigned_to,
-        u.email AS modified_by
-      FROM "PreventiveMaintenance_Hist" h
-      JOIN "User" u ON h.user_id = u.user_id
-      WHERE h.maintenance_id = $1
-      ORDER BY h.action_date DESC`,
-      [req.params.id]
-    );
-
-    const history = [];
-    let previous = null;
-
-    const formatDate = (date) => {
-      if (!date) return null;
-      const d = new Date(date);
-      return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
-    };
-
-    const reversedRows = [...result.rows].reverse(); // process oldest → newest
-
-    reversedRows.forEach((current) => {
-      if (!previous) {
-        // Nothing to compare yet
-        previous = current;
-        return;
-      }
-
-      const changes = {};
-      const fieldsToCompare = [
-        'machine_id', 'maintenance_type', 'task_name', 'task_description',
-        'start_date', 'end_date', 'completed_date', 'task_status', 'assigned_to'
-      ];
-
-      fieldsToCompare.forEach(field => {
-        const prevVal = ['start_date', 'end_date', 'completed_date'].includes(field)
-          ? formatDate(previous[field])
-          : previous[field];
-
-        const currVal = ['start_date', 'end_date', 'completed_date'].includes(field)
-          ? formatDate(current[field])
-          : current[field];
-
-        if (prevVal !== currVal) {
-          changes[field] = { old: prevVal, new: currVal };
-        }
-      });
-
-      if (Object.keys(changes).length > 0) {
-        history.push({
-          action_date: current.action_date,
-          modified_by: current.modified_by,
-          changes
-        });
-      }
-
-      previous = current;
-    });
-
-    res.json(history.reverse()); // newest first
-  } catch (err) {
-    console.error("Error fetching history:", err);
-    res.status(500).json({ message: "Error fetching history" });
-  }
-});
-
-
-router.get('/maintenance/:id/history', async (req, res) => {
-  try {
     const { rows } = await pool.query(
       `
       WITH hist AS (
@@ -1878,7 +1798,6 @@ router.get('/maintenance/:id/history', async (req, res) => {
     res.status(500).json({ message: 'Error fetching history' });
   }
 });
-
 
 
 router.put("/maintenance/:id", async (req, res) => {
@@ -2155,7 +2074,6 @@ router.put("/maintenance/:id", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
 
 router.delete('/maintenance/:maintenance_id', async (req, res) => {
   const { maintenance_id } = req.params;
