@@ -1229,6 +1229,7 @@ router.get('/failures', async (req, res) => {
 router.put('/failure/:failure_id', async (req, res) => {
   const { failure_id } = req.params;
   const {
+    machine_id,        // <-- from the dropdown
     failure_desc,
     solution,
     failure_date,
@@ -1239,10 +1240,15 @@ router.put('/failure/:failure_id', async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE "FailureLog"
-       SET failure_desc = $1, solution = $2, failure_date = $3, status = $4, resolved_date = $5
-       WHERE failure_id = $6
+       SET machine_id = $1,
+           failure_desc = $2,
+           solution = $3,
+           failure_date = $4,
+           status = $5,
+           resolved_date = $6
+       WHERE failure_id = $7
        RETURNING *`,
-      [failure_desc, solution, failure_date, status, resolved_date, failure_id]
+      [machine_id, failure_desc, solution, failure_date, status, resolved_date, failure_id]
     );
 
     if (result.rows.length === 0) {
@@ -1255,6 +1261,7 @@ router.put('/failure/:failure_id', async (req, res) => {
     res.status(500).json({ message: 'Error updating failure' });
   }
 });
+
 
 // Delete failure
 router.delete('/failure/:id', async (req, res) => {
