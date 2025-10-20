@@ -212,6 +212,7 @@ router.post(
         water_temp_unit,
         dust_extraction,
         fume_extraction,
+        powerunits,
         user_id,
       } = req.body;
 
@@ -242,10 +243,10 @@ router.post(
           machineimagefile, files_3d, files_2d, spare_parts_list, electrical_diagram, plc_program, hmi_program, 
           other_programs, machine_manual, operation_instruction, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
           cpk_data, production_rate, validation_document, parameter_studies, air_needed, air_pressure, air_pressure_unit, 
-          voltage, phases, amperage, frequency, water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction) 
+          voltage, phases, amperage, frequency, water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction, powerunits) 
         VALUES 
           ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 
-           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37) 
+           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38) 
         RETURNING machine_id`,
         [
           machine_ref,
@@ -285,6 +286,7 @@ router.post(
           water_temp_unit,
           dust_extraction,
           fume_extraction,
+          powerunits
         ]
       );
 
@@ -299,10 +301,10 @@ router.post(
           other_programs, machine_manual, operation_instruction, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
           cpk_data, production_rate, validation_document, parameter_studies, action_type, action_date, 
           user_id, air_needed, air_pressure, air_pressure_unit, voltage, phases, amperage, frequency, 
-          water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction) 
+          water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction, powerunits) 
         VALUES 
           ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)`,
+           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42)`,
         [
           machine_id,
           machine_ref,
@@ -345,6 +347,7 @@ router.post(
           water_temp_unit,
           dust_extraction,
           fume_extraction,
+          powerunits
         ]
       );
 
