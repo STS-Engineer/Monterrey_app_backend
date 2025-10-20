@@ -560,10 +560,10 @@ router.put(
     { name: "files_3d", maxCount: 1 },
     { name: "files_2d", maxCount: 1 },
     { name: "spare_parts_list", maxCount: 1 },
-    { name: 'electrical_diagram', maxCount: 1 },
-    { name: 'cpk_data', maxCount: 1 },
-    { name: 'validation_document', maxCount: 1 },
-    { name: 'parameter_studies', maxCount: 1 },
+    { name: "electrical_diagram", maxCount: 1 },
+    { name: "cpk_data", maxCount: 1 },
+    { name: "validation_document", maxCount: 1 },
+    { name: "parameter_studies", maxCount: 1 },
     { name: "plc_program", maxCount: 1 },
     { name: "hmi_program", maxCount: 1 },
     { name: "other_programs", maxCount: 1 },
@@ -572,10 +572,9 @@ router.put(
   async (req, res) => {
     const { id } = req.params;
 
-    // Fix: use req.body instead of requestBody
     const cleanedBody = Object.fromEntries(
       Object.entries(req.body).map(([key, value]) => {
-        return [key, value === 'null' ? null : value];
+        return [key, value === "null" ? null : value];
       })
     );
 
@@ -606,136 +605,187 @@ router.put(
       fume_extraction,
       user_id,
     } = cleanedBody;
-    console.log(cleanedBody);
 
-    const getFile = (field) =>
-      req.files && req.files[field] ? req.files[field][0].filename : null;
+    console.log("Cleaned Body:", cleanedBody);
+    console.log("Files received:", req.files);
 
-    const machineimagefile = getFile("machineimagefile");
-    const files_3d = getFile("files_3d");
-    const files_2d = getFile("files_2d");
-    const spare_parts_list = getFile("spare_parts_list");
-    const electrical_diagram = getFile("electrical_diagram");
-    const cpk_data = getFile("cpk_data");
-    const validation_document = getFile("validation_document");
-    const parameter_studies = getFile("parameter_studies");
-    const plc_program = getFile("plc_program");
-    const hmi_program = getFile("hmi_program");
-    const other_programs = getFile("other_programs");
-    const machine_manual = getFile("machine_manual");
+    // FIXED: Helper function to determine file value
+    const getFileValue = (field) => {
+      const action = req.body[`${field}_action`];
+
+      console.log(
+        `Processing ${field}: action=${action}, hasFile=${!!(
+          req.files && req.files[field]
+        )}`
+      );
+
+      if (req.files && req.files[field]) {
+        // New file uploaded
+        console.log(`New file for ${field}:`, req.files[field][0].filename);
+        return req.files[field][0].filename;
+      } else if (action === "delete") {
+        // File marked for deletion
+        console.log(`Deleting file for ${field}`);
+        return null;
+      } else {
+        // FIXED: Default behavior - keep existing file (return undefined so it's not updated)
+        console.log(`Keeping existing file for ${field} (no change)`);
+        return undefined;
+      }
+    };
+
+    const fileFields = [
+      "machineimagefile",
+      "files_3d",
+      "files_2d",
+      "spare_parts_list",
+      "electrical_diagram",
+      "cpk_data",
+      "validation_document",
+      "parameter_studies",
+      "plc_program",
+      "hmi_program",
+      "other_programs",
+      "machine_manual",
+    ];
+
+    const fileUpdates = {};
+    fileFields.forEach((field) => {
+      const value = getFileValue(field);
+      if (value !== undefined) {
+        fileUpdates[field] = value;
+      }
+    });
+
+    console.log("File updates:", fileUpdates);
 
     try {
       await pool.query("BEGIN");
 
-      const updatedResult = await pool.query(
-        `
+      // Build dynamic SQL for file updates
+      const fileSetClauses = Object.keys(fileUpdates).map((field, idx) => {
+        return `${field} = $${24 + idx + 1}`;
+      });
+
+      const updateQuery = `
         UPDATE "Machines" SET
           machine_ref = $1, machine_name = $2, brand = $3, model = $4, 
           product_line = $5, production_line = $6, station = $7,
           consumables = $8, fixture_numbers = $9, 
-          gage_numbers = $10, tooling_numbers = $11, cpk_data = COALESCE($12, cpk_data), 
-          production_rate = $13, validation_document = COALESCE($14, validation_document), parameter_studies = COALESCE($15, validation_document), 
-          air_needed = $16, air_pressure = $17, air_pressure_unit = $18, 
-          voltage = $19, phases = $20, amperage = $21, frequency = $22, 
-          water_cooling = $23, water_temp = $24, water_temp_unit = $25, 
-          dust_extraction = $26, fume_extraction = $27,
-          machineimagefile = COALESCE($28, machineimagefile),
-          files_3d = COALESCE($29, files_3d),
-          files_2d = COALESCE($30, files_2d),
-          spare_parts_list = COALESCE($31, spare_parts_list),
-          electrical_diagram = COALESCE($32, electrical_diagram),
-          plc_program = COALESCE($33, plc_program),
-          hmi_program = COALESCE($34, hmi_program),
-          other_programs = COALESCE($35, other_programs),
-          machine_manual = COALESCE($36, machine_manual)
-        WHERE machine_id = $37
+          gage_numbers = $10, tooling_numbers = $11, 
+          production_rate = $12,
+          air_needed = $13, air_pressure = $14, air_pressure_unit = $15, 
+          voltage = $16, phases = $17, amperage = $18, frequency = $19, 
+          water_cooling = $20, water_temp = $21, water_temp_unit = $22, 
+          dust_extraction = $23, fume_extraction = $24
+          ${fileSetClauses.length > 0 ? "," + fileSetClauses.join(", ") : ""}
+        WHERE machine_id = $${25 + Object.keys(fileUpdates).length}
         RETURNING *
-      `,
-        [
-          machine_ref, machine_name, brand, model,
-          product_line, production_line, station,
-          consumables, fixture_numbers,
-          gage_numbers, tooling_numbers, cpk_data,
-          production_rate, validation_document, parameter_studies,
-          air_needed, air_pressure, air_pressure_unit,
-          voltage, phases, amperage, frequency,
-          water_cooling, water_temp, water_temp_unit,
-          dust_extraction, fume_extraction,
-          machineimagefile, files_3d, files_2d,
-          spare_parts_list, electrical_diagram, plc_program, hmi_program,
-          other_programs, machine_manual,
-          id
-        ]
-      );
+      `;
+
+      const queryParams = [
+        machine_ref,
+        machine_name,
+        brand,
+        model,
+        product_line,
+        production_line,
+        station,
+        consumables,
+        fixture_numbers,
+        gage_numbers,
+        tooling_numbers,
+        production_rate,
+        air_needed,
+        air_pressure,
+        air_pressure_unit,
+        voltage,
+        phases,
+        amperage,
+        frequency,
+        water_cooling,
+        water_temp,
+        water_temp_unit,
+        dust_extraction,
+        fume_extraction,
+        ...Object.values(fileUpdates),
+        id,
+      ];
+
+      console.log("Update Query:", updateQuery);
+      console.log("Query Params:", queryParams);
+
+      const updatedResult = await pool.query(updateQuery, queryParams);
 
       const updatedMachine = updatedResult.rows[0];
       const machine_id = updatedMachine.machine_id;
       const parsedUserId = user_id ? parseInt(user_id, 10) : null;
 
+      // Insert into history table
       await pool.query(
         `INSERT INTO "Machines_Hist" 
           (machine_id, machine_ref, machine_name, brand, model, product_line, production_line, station,
-         machineimagefile, files_3d, files_2d, spare_parts_list, electrical_diagram, plc_program, hmi_program, 
-          other_programs, machine_manual, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
-          cpk_data, production_rate, validation_document, parameter_studies, action_type, action_date, 
-          user_id, air_needed, air_pressure, air_pressure_unit, voltage, phases, amperage, frequency, 
-          water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction) 
+           machineimagefile, files_3d, files_2d, spare_parts_list, electrical_diagram, plc_program, hmi_program, 
+           other_programs, machine_manual, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
+           cpk_data, production_rate, validation_document, parameter_studies, action_type, action_date, 
+           user_id, air_needed, air_pressure, air_pressure_unit, voltage, phases, amperage, frequency, 
+           water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction) 
         VALUES 
           ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-           $21, $22, $23, $24, $25, $26, NOW(), $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)`, // 39 placeholders
+           $21, $22, $23, $24, $25, $26, NOW(), $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)`,
         [
-          machine_id,                // $1
-          machine_ref,               // $2
-          machine_name,              // $3
-          brand,                     // $4
-          model,                     // $5
-          product_line,              // $6
-          production_line,           // $7
-          station,                   // $8
-          machineimagefile || updatedMachine.machineimagefile, // $9
-          files_3d || updatedMachine.files_3d, // $10
-          files_2d || updatedMachine.files_2d, // $11
-          spare_parts_list || updatedMachine.spare_parts_list, // $12
-          electrical_diagram || updatedMachine.electrical_diagram, // $13
-          plc_program || updatedMachine.plc_program, // $14
-          hmi_program || updatedMachine.hmi_program, // $15
-          other_programs || updatedMachine.other_programs, // $16
-          machine_manual || updatedMachine.machine_manual, // $17
-          consumables,               // $18
-          fixture_numbers,           // $19
-          gage_numbers,              // $20
-          tooling_numbers,           // $21
-          cpk_data || updatedMachine.cpk_data, // $22
-          production_rate,           // $23
-          validation_document || updatedMachine.validation_document, // $24
-          parameter_studies || updatedMachine.parameter_studies, // $25
-          "UPDATE",                  // $26 (action_type)
-          parsedUserId,              // $27 (user_id)
-          air_needed,                // $28
-          air_pressure,              // $29
-          air_pressure_unit,         // $30
-          voltage,                   // $31
-          phases,                    // $32
-          amperage,                  // $33
-          frequency,                 // $34
-          water_cooling,             // $35
-          water_temp,                // $36
-          water_temp_unit,           // $37
-          dust_extraction,           // $38
-          fume_extraction            // $39
+          machine_id,
+          machine_ref,
+          machine_name,
+          brand,
+          model,
+          product_line,
+          production_line,
+          station,
+          updatedMachine.machineimagefile,
+          updatedMachine.files_3d,
+          updatedMachine.files_2d,
+          updatedMachine.spare_parts_list,
+          updatedMachine.electrical_diagram,
+          updatedMachine.plc_program,
+          updatedMachine.hmi_program,
+          updatedMachine.other_programs,
+          updatedMachine.machine_manual,
+          consumables,
+          fixture_numbers,
+          gage_numbers,
+          tooling_numbers,
+          updatedMachine.cpk_data,
+          production_rate,
+          updatedMachine.validation_document,
+          updatedMachine.parameter_studies,
+          "UPDATE",
+          parsedUserId,
+          air_needed,
+          air_pressure,
+          air_pressure_unit,
+          voltage,
+          phases,
+          amperage,
+          frequency,
+          water_cooling,
+          water_temp,
+          water_temp_unit,
+          dust_extraction,
+          fume_extraction,
         ]
       );
+
       await pool.query("COMMIT");
 
       res.status(200).json(updatedMachine);
     } catch (error) {
       await pool.query("ROLLBACK");
       console.error("Error updating machine:", error);
-      res.status(500).json({ message: "Error updating machine" });
+      res.status(500).json({ message: "Error updating machine", error: error.message });
     }
   }
 );
-
 
 router.delete('/machines/:machine_id', async (req, res) => {
   const { machine_id } = req.params;
