@@ -1860,6 +1860,7 @@ router.get('/maintenance/:id/history', async (req, res) => {
 });
 
 
+// PUT - Update maintenance with recurrence
 router.put("/maintenance/:id", async (req, res) => {
   const { id } = req.params;
   const {
@@ -2201,6 +2202,7 @@ router.put("/maintenance/:id", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 
 router.delete('/maintenance/:maintenance_id', async (req, res) => {
