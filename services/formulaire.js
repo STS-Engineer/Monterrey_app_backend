@@ -1878,41 +1878,52 @@ router.put("/maintenance/:id", async (req, res) => {
   } = req.body;
 
   const mapMonthlyOrdinal = (ordinal) => {
-  if (!ordinal) return null;
-  const mapping = {
-    'first': 1,
-    'second': 2, 
-    'third': 3,
-    'fourth': 4,
-    'last': 5
+    if (!ordinal) return null;
+    const mapping = {
+      first: 1,
+      second: 2,
+      third: 3,
+      fourth: 4,
+      last: 5,
+    };
+    return mapping[ordinal] || null;
   };
-  return mapping[ordinal] || null;
-};
 
-// Helper function to ensure weekday is integer
-const mapMonthlyWeekday = (weekday) => {
-  if (weekday === null || weekday === undefined) return null;
-  return parseInt(weekday);
-};
+  const mapMonthlyWeekday = (weekday) => {
+    if (weekday === null || weekday === undefined) return null;
+    return parseInt(weekday);
+  };
 
-  console.log(`Updating maintenance ${id}`, { 
-    machine_id, maintenance_type, task_name, task_status, assigned_to,
-    recurrence: recurrence ? 'present' : 'absent' 
+  // ALWAYS return a non-null pattern variant (use 'standard' as safe default)
+  const determinePatternVariant = (frequency, monthlyDay, weekOfMonth, weekday) => {
+    if (frequency === "monthly" || frequency === "yearly") {
+      if (monthlyDay !== null && monthlyDay !== undefined) return "standard";
+      if (weekOfMonth !== null && weekday !== null && weekOfMonth !== undefined && weekday !== undefined) return "monthly_nth";
+      return "standard";
+    }
+    // For daily/weekly/others use 'standard' so column is never null
+    return "standard";
+  };
+
+  console.log(`Updating maintenance ${id}`, {
+    machine_id,
+    maintenance_type,
+    task_name,
+    task_status,
+    assigned_to,
+    recurrence: recurrence ? "present" : "absent",
   });
 
   try {
-    // --- Step 1: Get the old state before update ---
+    // Step 1: fetch old row
     const oldResult = await pool.query(
       `SELECT * FROM "PreventiveMaintenance" WHERE maintenance_id = $1`,
       [id]
     );
     const oldData = oldResult.rows[0];
+    if (!oldData) return res.status(404).json({ message: "Maintenance task not found" });
 
-    if (!oldData) {
-      return res.status(404).json({ message: "Maintenance task not found" });
-    }
-
-    // --- Step 2: Update PreventiveMaintenance main table ---
+    // Step 2: update main record
     await pool.query(
       `UPDATE "PreventiveMaintenance"
        SET machine_id = $1,
@@ -1941,113 +1952,84 @@ const mapMonthlyWeekday = (weekday) => {
       ]
     );
 
-    // --- Step 3: Handle recurrence (Maintenance_schedule table) ---
+    // Step 3: handle recurrence / schedule
     let recurrenceData = {};
     let scheduleChanges = [];
 
-    // Add this helper function near the top with your other helper functions
-const determinePatternVariant = (frequency, monthlyDay, weekOfMonth, weekday) => {
-  if (frequency !== 'monthly' && frequency !== 'yearly') {
-    return null; // No pattern_variant needed for other frequencies
-  }
-  
-  // If using day-of-month pattern (e.g., "15th of each month")
-  if (monthlyDay !== null && monthlyDay !== undefined) {
-    return 'standard';
-  }
-  
-  // If using weekday pattern (e.g., "second Tuesday")
-  if ((weekOfMonth !== null && weekOfMonth !== undefined) && 
-      (weekday !== null && weekday !== undefined)) {
-    return 'monthly_nth';
-  }
-  
-  // Default to standard if nothing is specified
-  return 'standard';
-};
+    if (recurrence) {
+      const {
+        frequency,
+        interval,
+        weekdays,
+        monthly_day,
+        monthly_ordinal,
+        monthly_weekday,
+        yearly_month,
+        recurrence_end_date,
+      } = recurrence;
 
-   if (recurrence) {
-  const {
-    frequency,
-    interval,
-    weekdays,
-    monthly_day,
-    monthly_ordinal,
-    monthly_weekday,
-    yearly_month,
-    recurrence_end_date,
-  } = recurrence;
+      // Map and parse incoming values
+      let finalMonthlyDay = (monthly_day !== null && monthly_day !== undefined) ? parseInt(monthly_day) : null;
+      let finalWeekOfMonth = mapMonthlyOrdinal(monthly_ordinal);
+      let finalWeekday = mapMonthlyWeekday(monthly_weekday);
 
-  // === ADD THIS VALIDATION FOR MONTHLY PATTERNS ===
-  let finalMonthlyDay = null;
-  let finalWeekOfMonth = null;
-  let finalWeekday = null;
+      // If frequency not monthly, ensure monthly fields are null
+      if (frequency !== "monthly") {
+        finalMonthlyDay = null;
+        finalWeekOfMonth = null;
+        finalWeekday = null;
+      } else {
+        // frequency === 'monthly' -> ensure only one pattern is used and provide a safe default
+        if (finalMonthlyDay && (finalWeekOfMonth || finalWeekday)) {
+          // prefer day-of-month
+          finalWeekOfMonth = null;
+          finalWeekday = null;
+        } else if (finalWeekOfMonth && finalWeekday) {
+          finalMonthlyDay = null;
+        } else if (!finalMonthlyDay && !(finalWeekOfMonth && finalWeekday)) {
+          // nothing provided — fallback to day=1 (standard)
+          finalMonthlyDay = 1;
+          finalWeekOfMonth = null;
+          finalWeekday = null;
+        }
+      }
 
-  if (frequency === 'monthly') {
-    // Ensure only one monthly pattern is used (not both day-of-month and weekday-of-month)
-    if (monthly_day && (monthly_ordinal || monthly_weekday)) {
-      console.warn('Both monthly_day and monthly_ordinal/weekday provided. Using monthly_day pattern.');
-      finalMonthlyDay = monthly_day;
-      finalWeekOfMonth = null;
-      finalWeekday = null;
-    } else if (monthly_ordinal && monthly_weekday) {
-      // Using weekday pattern (e.g., "second Tuesday")
-      finalMonthlyDay = null;
-      finalWeekOfMonth = mapMonthlyOrdinal(monthly_ordinal);
-      finalWeekday = mapMonthlyWeekday(monthly_weekday);
-    } else if (monthly_day) {
-      // Using day-of-month pattern (e.g., "day 15")
-      finalMonthlyDay = monthly_day;
-      finalWeekOfMonth = null;
-      finalWeekday = null;
-    } else {
-      // Default to day 1 if no pattern specified
-      finalMonthlyDay = 1;
-      finalWeekOfMonth = null;
-      finalWeekday = null;
-    }
-  } else {
-    // For non-monthly frequencies, pass through the values
-    finalMonthlyDay = monthly_day;
-    finalWeekOfMonth = mapMonthlyOrdinal(monthly_ordinal);
-    finalWeekday = mapMonthlyWeekday(monthly_weekday);
-  }
-  // === END OF VALIDATION ===
+      // Determine pattern variant (non-null)
+      let patternVariant = determinePatternVariant(frequency, finalMonthlyDay, finalWeekOfMonth, finalWeekday);
 
-  const mappedMonthlyOrdinal = finalWeekOfMonth;
-  const mappedMonthlyWeekday = finalWeekday;
+      // If patternVariant indicates monthly_nth but fields missing -> fallback to standard
+      if (frequency === "monthly" && patternVariant === "monthly_nth" && (finalWeekOfMonth === null || finalWeekday === null)) {
+        finalMonthlyDay = 1;
+        finalWeekOfMonth = null;
+        finalWeekday = null;
+        patternVariant = "standard";
+      }
 
-    // ADD THIS: Determine the pattern_variant
-  const patternVariant = determinePatternVariant(
-    frequency, 
-    finalMonthlyDay, 
-    mappedMonthlyOrdinal, 
-    mappedMonthlyWeekday
-  );
+      // Make sure rrule is explicitly null (DB constraint logic references it)
+      const rruleValue = null;
 
+      // Fetch existing schedule
+      const existingSchedule = await pool.query(
+        `SELECT * FROM "Maintenance_schedule" WHERE maintenance_id = $1`,
+        [id]
+      );
 
-  const existingSchedule = await pool.query(
-    `SELECT * FROM "Maintenance_schedule" WHERE maintenance_id = $1`,
-    [id]
-  );
-
-  // Map field names between frontend and database
-  const dbFields = {
-    repeat_kind: frequency,
-    interval: interval,
-    weekdays: weekdays,
-    monthday: finalMonthlyDay,  // Use the validated monthly_day
-    week_of_month: mappedMonthlyOrdinal, // Use the validated week_of_month
-    weekday: mappedMonthlyWeekday,       // Use the validated weekday
-    month: yearly_month,
-    until: recurrence_end_date,
-    pattern_variant: patternVariant
-  };
+      const dbFields = {
+        repeat_kind: frequency,
+        interval: interval,
+        weekdays: weekdays,
+        monthday: finalMonthlyDay,
+        week_of_month: finalWeekOfMonth,
+        weekday: finalWeekday,
+        month: yearly_month,
+        until: recurrence_end_date,
+        pattern_variant: patternVariant,
+        rrule: rruleValue,
+      };
 
       if (existingSchedule.rowCount > 0) {
         const oldSchedule = existingSchedule.rows[0];
-        
-        // Check for changes in schedule
+        // detect changes
         for (const [dbField, newValue] of Object.entries(dbFields)) {
           const oldValue = oldSchedule[dbField];
           if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
@@ -2055,51 +2037,53 @@ const determinePatternVariant = (frequency, monthlyDay, weekOfMonth, weekday) =>
           }
         }
 
-      // UPDATE query - add pattern_variant
-    await pool.query(
-      `UPDATE "Maintenance_schedule"
-       SET repeat_kind = $1,
-           interval = $2,
-           weekdays = $3,
-           monthday = $4,
-           week_of_month = $5,
-           weekday = $6,
-           month = $7,
-           until = $8,
-           pattern_variant = $9
-       WHERE maintenance_id = $10`,
-      [
-        frequency,
-        interval,
-        weekdays,
-        finalMonthlyDay,
-        mappedMonthlyOrdinal,
-        mappedMonthlyWeekday,
-        yearly_month,
-        recurrence_end_date,
-        patternVariant,  // ADD THIS
-        id,
-      ]
-    );
+        // update
+        await pool.query(
+          `UPDATE "Maintenance_schedule"
+           SET repeat_kind = $1,
+               interval = $2,
+               weekdays = $3,
+               monthday = $4,
+               week_of_month = $5,
+               weekday = $6,
+               month = $7,
+               until = $8,
+               pattern_variant = $9,
+               rrule = $10
+           WHERE maintenance_id = $11`,
+          [
+            frequency,
+            interval,
+            weekdays,
+            finalMonthlyDay,
+            finalWeekOfMonth,
+            finalWeekday,
+            yearly_month,
+            recurrence_end_date,
+            patternVariant,
+            rruleValue,
+            id,
+          ]
+        );
       } else {
-        // New schedule - all fields are changes
+        // insert (make sure columns and values line up)
         scheduleChanges = Object.keys(dbFields);
-        
         await pool.query(
           `INSERT INTO "Maintenance_schedule"
-           (maintenance_id, repeat_kind, interval, weekdays, monthday, week_of_month, weekday, month, until)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+           (maintenance_id, repeat_kind, interval, weekdays, monthday, week_of_month, weekday, month, until, pattern_variant, rrule)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
           [
             id,
             frequency,
             interval,
             weekdays,
-            monthly_day,
-            mappedMonthlyOrdinal,  // CHANGED: from monthly_ordinal to mappedMonthlyOrdinal
-            mappedMonthlyWeekday, 
+            finalMonthlyDay,
+            finalWeekOfMonth,
+            finalWeekday,
             yearly_month,
             recurrence_end_date,
-                patternVariant,
+            patternVariant,
+            rruleValue,
           ]
         );
       }
@@ -2108,37 +2092,33 @@ const determinePatternVariant = (frequency, monthlyDay, weekOfMonth, weekday) =>
         frequency,
         interval,
         weekdays,
-        monthly_day,
-        monthly_ordinal: mappedMonthlyOrdinal,  // CHANGED: from monthly_ordinal to mappedMonthlyOrdinal
-        monthly_weekday: mappedMonthlyWeekday,
+        monthly_day: finalMonthlyDay,
+        monthly_ordinal: finalWeekOfMonth,
+        monthly_weekday: finalWeekday,
         yearly_month,
         recurrence_end_date,
-        pattern_variant: patternVariant
+        pattern_variant: patternVariant,
       };
     } else {
-      // If no recurrence data, delete existing schedule if it exists
+      // no recurrence -> delete any existing schedule
       const existingSchedule = await pool.query(
         `SELECT * FROM "Maintenance_schedule" WHERE maintenance_id = $1`,
         [id]
       );
-      
       if (existingSchedule.rowCount > 0) {
-        scheduleChanges = ['recurrence_removed'];
-        await pool.query(
-          `DELETE FROM "Maintenance_schedule" WHERE maintenance_id = $1`,
-          [id]
-        );
+        scheduleChanges = ["recurrence_removed"];
+        await pool.query(`DELETE FROM "Maintenance_schedule" WHERE maintenance_id = $1`, [id]);
       }
     }
 
-    // --- Step 4: Get the new state after update ---
+    // Step 4: fetch updated main row
     const newResult = await pool.query(
       `SELECT * FROM "PreventiveMaintenance" WHERE maintenance_id = $1`,
       [id]
     );
     const newData = newResult.rows[0];
 
-    // --- Step 5: Compare old vs new to detect changes ---
+    // Step 5: detect changes
     const changedFields = [];
     for (const key in newData) {
       if (
@@ -2150,22 +2130,20 @@ const determinePatternVariant = (frequency, monthlyDay, weekOfMonth, weekday) =>
       }
     }
 
-    // Add recurrence field changes
+    // Add schedule changes mapped to frontend names
     if (scheduleChanges.length > 0) {
-      // Map database field names back to frontend field names
       const fieldMapping = {
-        'repeat_kind': 'frequency',
-        'interval': 'interval',
-        'weekdays': 'weekdays',
-        'monthday': 'monthly_day',
-        'week_of_month': 'monthly_ordinal',
-        'weekday': 'monthly_weekday',
-        'month': 'yearly_month',
-        'until': 'recurrence_end_date',
-        'recurrence_removed': 'recurrence_removed'
+        repeat_kind: "frequency",
+        interval: "interval",
+        weekdays: "weekdays",
+        monthday: "monthly_day",
+        week_of_month: "monthly_ordinal",
+        weekday: "monthly_weekday",
+        month: "yearly_month",
+        until: "recurrence_end_date",
+        recurrence_removed: "recurrence_removed",
       };
-
-      scheduleChanges.forEach(dbField => {
+      scheduleChanges.forEach((dbField) => {
         const frontendField = fieldMapping[dbField];
         if (frontendField && !changedFields.includes(frontendField)) {
           changedFields.push(frontendField);
@@ -2173,12 +2151,8 @@ const determinePatternVariant = (frequency, monthlyDay, weekOfMonth, weekday) =>
       });
     }
 
-    console.log('Detected changes:', changedFields);
-
-    // --- Step 6: Save new version to history if something changed ---
+    // Step 6: write history if any changes
     if (changedFields.length > 0) {
-      console.log('Saving history record with changes:', changedFields);
-      
       await pool.query(
         `INSERT INTO "PreventiveMaintenance_Hist" 
          (maintenance_id, machine_id, maintenance_type, task_name, task_description, 
@@ -2227,6 +2201,7 @@ const determinePatternVariant = (frequency, monthlyDay, weekOfMonth, weekday) =>
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 router.delete('/maintenance/:maintenance_id', async (req, res) => {
   const { maintenance_id } = req.params;
