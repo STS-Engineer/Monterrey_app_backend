@@ -566,11 +566,12 @@ router.put(
     { name: "electrical_diagram", maxCount: 1 },
     { name: "cpk_data", maxCount: 1 },
     { name: "validation_document", maxCount: 1 },
-    { name: "parameter_studies", maxCount: 1 },
+    { name: "parameter_studies", maxCount: 1 }, // ✅ Added as file field
     { name: "plc_program", maxCount: 1 },
     { name: "hmi_program", maxCount: 1 },
     { name: "other_programs", maxCount: 1 },
     { name: "machine_manual", maxCount: 1 },
+    { name: "operation_instruction", maxCount: 1 },
   ]),
   async (req, res) => {
     const { id } = req.params;
@@ -612,7 +613,7 @@ router.put(
     console.log("Cleaned Body:", cleanedBody);
     console.log("Files received:", req.files);
 
-    // FIXED: Helper function to determine file value
+    // ✅ Helper function for file handling
     const getFileValue = (field) => {
       const action = req.body[`${field}_action`];
 
@@ -623,20 +624,21 @@ router.put(
       );
 
       if (req.files && req.files[field]) {
-        // New file uploaded
         console.log(`New file for ${field}:`, req.files[field][0].filename);
         return req.files[field][0].filename;
       } else if (action === "delete") {
-        // File marked for deletion
         console.log(`Deleting file for ${field}`);
         return null;
-      } else {
-        // FIXED: Default behavior - keep existing file (return undefined so it's not updated)
-        console.log(`Keeping existing file for ${field} (no change)`);
+      } else if (action === "keep") {
+        console.log(`Keeping existing file for ${field}`);
         return undefined;
+      } else {
+        console.log(`No action specified for ${field}, clearing field`);
+        return null;
       }
     };
 
+    // ✅ Include all file fields (added parameter_studies here)
     const fileFields = [
       "machineimagefile",
       "files_3d",
@@ -645,11 +647,12 @@ router.put(
       "electrical_diagram",
       "cpk_data",
       "validation_document",
-      "parameter_studies",
+      "parameter_studies", // ✅ Added
       "plc_program",
       "hmi_program",
       "other_programs",
       "machine_manual",
+      "operation_instruction",
     ];
 
     const fileUpdates = {};
@@ -665,7 +668,6 @@ router.put(
     try {
       await pool.query("BEGIN");
 
-      // Build dynamic SQL for file updates
       const fileSetClauses = Object.keys(fileUpdates).map((field, idx) => {
         return `${field} = $${24 + idx + 1}`;
       });
@@ -719,23 +721,22 @@ router.put(
       console.log("Query Params:", queryParams);
 
       const updatedResult = await pool.query(updateQuery, queryParams);
-
       const updatedMachine = updatedResult.rows[0];
       const machine_id = updatedMachine.machine_id;
       const parsedUserId = user_id ? parseInt(user_id, 10) : null;
 
-      // Insert into history table
+      // ✅ History table insert (parameter_studies included)
       await pool.query(
         `INSERT INTO "Machines_Hist" 
           (machine_id, machine_ref, machine_name, brand, model, product_line, production_line, station,
-           machineimagefile, files_3d, files_2d, spare_parts_list, electrical_diagram, plc_program, hmi_program, 
-           other_programs, machine_manual, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
-           cpk_data, production_rate, validation_document, parameter_studies, action_type, action_date, 
-           user_id, air_needed, air_pressure, air_pressure_unit, voltage, phases, amperage, frequency, 
-           water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction) 
-        VALUES 
-          ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-           $21, $22, $23, $24, $25, $26, NOW(), $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)`,
+           machineimagefile, files_3d, files_2d, spare_parts_list, electrical_diagram, plc_program, 
+           hmi_program, other_programs, machine_manual, operation_instruction, consumables, fixture_numbers, 
+           gage_numbers, tooling_numbers, cpk_data, production_rate, validation_document, parameter_studies, 
+           action_type, action_date, user_id, air_needed, air_pressure, air_pressure_unit, voltage, phases, 
+           amperage, frequency, water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction)
+         VALUES 
+           ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 
+            $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)`,
         [
           machine_id,
           machine_ref,
@@ -754,6 +755,7 @@ router.put(
           updatedMachine.hmi_program,
           updatedMachine.other_programs,
           updatedMachine.machine_manual,
+          updatedMachine.operation_instruction,
           consumables,
           fixture_numbers,
           gage_numbers,
@@ -761,8 +763,9 @@ router.put(
           updatedMachine.cpk_data,
           production_rate,
           updatedMachine.validation_document,
-          updatedMachine.parameter_studies,
+          updatedMachine.parameter_studies, // ✅ included here
           "UPDATE",
+          new Date(),
           parsedUserId,
           air_needed,
           air_pressure,
@@ -780,7 +783,6 @@ router.put(
       );
 
       await pool.query("COMMIT");
-
       res.status(200).json(updatedMachine);
     } catch (error) {
       await pool.query("ROLLBACK");
@@ -789,6 +791,8 @@ router.put(
     }
   }
 );
+
+
 
 router.delete('/machines/:machine_id', async (req, res) => {
   const { machine_id } = req.params;
@@ -1860,243 +1864,349 @@ router.get('/maintenance/:id/history', async (req, res) => {
 });
 
 
-// PUT - Update maintenance with recurrence
-router.put(
-  "/machines/:id",
-  upload.fields([
-    { name: "machineimagefile", maxCount: 1 },
-    { name: "files_3d", maxCount: 1 },
-    { name: "files_2d", maxCount: 1 },
-    { name: "spare_parts_list", maxCount: 1 },
-    { name: "electrical_diagram", maxCount: 1 },
-    { name: "cpk_data", maxCount: 1 },
-    { name: "validation_document", maxCount: 1 },
-    { name: "parameter_studies", maxCount: 1 }, // ✅ Added as file field
-    { name: "plc_program", maxCount: 1 },
-    { name: "hmi_program", maxCount: 1 },
-    { name: "other_programs", maxCount: 1 },
-    { name: "machine_manual", maxCount: 1 },
-    { name: "operation_instruction", maxCount: 1 },
-  ]),
-  async (req, res) => {
-    const { id } = req.params;
 
-    const cleanedBody = Object.fromEntries(
-      Object.entries(req.body).map(([key, value]) => {
-        return [key, value === "null" ? null : value];
-      })
+
+router.put("/maintenance/:id", async (req, res) => {
+  const { id } = req.params;
+  const {
+    machine_id,
+    maintenance_type,
+    task_name,
+    task_description,
+    start_date,
+    end_date,
+    completed_date,
+    task_status,
+    assigned_to,
+    creator,
+    user_id,
+    recurrence,
+  } = req.body;
+
+  const mapMonthlyOrdinal = (ordinal) => {
+    if (!ordinal) return null;
+    const mapping = {
+      first: 1,
+      second: 2,
+      third: 3,
+      fourth: 4,
+      last: 5,
+    };
+    return mapping[ordinal] || null;
+  };
+
+  const mapMonthlyWeekday = (weekday) => {
+    if (weekday === null || weekday === undefined) return null;
+    return parseInt(weekday);
+  };
+
+  // ALWAYS return a non-null pattern variant (use 'standard' as safe default)
+  const determinePatternVariant = (frequency, monthlyDay, weekOfMonth, weekday) => {
+    if (frequency === "monthly" || frequency === "yearly") {
+      if (monthlyDay !== null && monthlyDay !== undefined) return "standard";
+      if (weekOfMonth !== null && weekday !== null && weekOfMonth !== undefined && weekday !== undefined) return "monthly_nth";
+      return "standard";
+    }
+    // For daily/weekly/others use 'standard' so column is never null
+    return "standard";
+  };
+
+  console.log(`Updating maintenance ${id}`, {
+    machine_id,
+    maintenance_type,
+    task_name,
+    task_status,
+    assigned_to,
+    recurrence: recurrence ? "present" : "absent",
+  });
+
+  try {
+    // Step 1: fetch old row
+    const oldResult = await pool.query(
+      `SELECT * FROM "PreventiveMaintenance" WHERE maintenance_id = $1`,
+      [id]
+    );
+    const oldData = oldResult.rows[0];
+    if (!oldData) return res.status(404).json({ message: "Maintenance task not found" });
+
+    // Step 2: update main record
+    await pool.query(
+      `UPDATE "PreventiveMaintenance"
+       SET machine_id = $1,
+           maintenance_type = $2,
+           task_name = $3,
+           task_description = $4,
+           start_date = $5,
+           end_date = $6,
+           completed_date = $7,
+           task_status = $8,
+           assigned_to = $9,
+           creator = $10
+       WHERE maintenance_id = $11`,
+      [
+        machine_id,
+        maintenance_type,
+        task_name,
+        task_description,
+        start_date,
+        end_date,
+        completed_date,
+        task_status,
+        assigned_to,
+        creator,
+        id,
+      ]
     );
 
-    const {
-      machine_ref,
-      machine_name,
-      brand,
-      model,
-      product_line,
-      production_line,
-      station,
-      consumables,
-      fixture_numbers,
-      gage_numbers,
-      tooling_numbers,
-      production_rate,
-      air_needed,
-      air_pressure,
-      air_pressure_unit,
-      voltage,
-      phases,
-      amperage,
-      frequency,
-      water_cooling,
-      water_temp,
-      water_temp_unit,
-      dust_extraction,
-      fume_extraction,
-      user_id,
-    } = cleanedBody;
+    // Step 3: handle recurrence / schedule
+    let recurrenceData = {};
+    let scheduleChanges = [];
 
-    console.log("Cleaned Body:", cleanedBody);
-    console.log("Files received:", req.files);
+    if (recurrence) {
+      const {
+        frequency,
+        interval,
+        weekdays,
+        monthly_day,
+        monthly_ordinal,
+        monthly_weekday,
+        yearly_month,
+        recurrence_end_date,
+      } = recurrence;
 
-    // ✅ Helper function for file handling
-    const getFileValue = (field) => {
-      const action = req.body[`${field}_action`];
+      // Map and parse incoming values
+      let finalMonthlyDay = (monthly_day !== null && monthly_day !== undefined) ? parseInt(monthly_day) : null;
+      let finalWeekOfMonth = mapMonthlyOrdinal(monthly_ordinal);
+      let finalWeekday = mapMonthlyWeekday(monthly_weekday);
 
-      console.log(
-        `Processing ${field}: action=${action}, hasFile=${!!(
-          req.files && req.files[field]
-        )}`
+      // If frequency not monthly, ensure monthly fields are null
+      if (frequency !== "monthly") {
+        finalMonthlyDay = null;
+        finalWeekOfMonth = null;
+        finalWeekday = null;
+      } else {
+        // frequency === 'monthly' -> ensure only one pattern is used and provide a safe default
+        if (finalMonthlyDay && (finalWeekOfMonth || finalWeekday)) {
+          // prefer day-of-month
+          finalWeekOfMonth = null;
+          finalWeekday = null;
+        } else if (finalWeekOfMonth && finalWeekday) {
+          finalMonthlyDay = null;
+        } else if (!finalMonthlyDay && !(finalWeekOfMonth && finalWeekday)) {
+          // nothing provided — fallback to day=1 (standard)
+          finalMonthlyDay = 1;
+          finalWeekOfMonth = null;
+          finalWeekday = null;
+        }
+      }
+
+      // Determine pattern variant (non-null)
+      let patternVariant = determinePatternVariant(frequency, finalMonthlyDay, finalWeekOfMonth, finalWeekday);
+
+      // If patternVariant indicates monthly_nth but fields missing -> fallback to standard
+      if (frequency === "monthly" && patternVariant === "monthly_nth" && (finalWeekOfMonth === null || finalWeekday === null)) {
+        finalMonthlyDay = 1;
+        finalWeekOfMonth = null;
+        finalWeekday = null;
+        patternVariant = "standard";
+      }
+
+      // Make sure rrule is explicitly null (DB constraint logic references it)
+      const rruleValue = null;
+
+      // Fetch existing schedule
+      const existingSchedule = await pool.query(
+        `SELECT * FROM "Maintenance_schedule" WHERE maintenance_id = $1`,
+        [id]
       );
 
-      if (req.files && req.files[field]) {
-        console.log(`New file for ${field}:`, req.files[field][0].filename);
-        return req.files[field][0].filename;
-      } else if (action === "delete") {
-        console.log(`Deleting file for ${field}`);
-        return null;
-      } else if (action === "keep") {
-        console.log(`Keeping existing file for ${field}`);
-        return undefined;
+      const dbFields = {
+        repeat_kind: frequency,
+        interval: interval,
+        weekdays: weekdays,
+        monthday: finalMonthlyDay,
+        week_of_month: finalWeekOfMonth,
+        weekday: finalWeekday,
+        month: yearly_month,
+        until: recurrence_end_date,
+        pattern_variant: patternVariant,
+        rrule: rruleValue,
+      };
+
+      if (existingSchedule.rowCount > 0) {
+        const oldSchedule = existingSchedule.rows[0];
+        // detect changes
+        for (const [dbField, newValue] of Object.entries(dbFields)) {
+          const oldValue = oldSchedule[dbField];
+          if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+            scheduleChanges.push(dbField);
+          }
+        }
+
+        // update
+        await pool.query(
+          `UPDATE "Maintenance_schedule"
+           SET repeat_kind = $1,
+               interval = $2,
+               weekdays = $3,
+               monthday = $4,
+               week_of_month = $5,
+               weekday = $6,
+               month = $7,
+               until = $8,
+               pattern_variant = $9,
+               rrule = $10
+           WHERE maintenance_id = $11`,
+          [
+            frequency,
+            interval,
+            weekdays,
+            finalMonthlyDay,
+            finalWeekOfMonth,
+            finalWeekday,
+            yearly_month,
+            recurrence_end_date,
+            patternVariant,
+            rruleValue,
+            id,
+          ]
+        );
       } else {
-        console.log(`No action specified for ${field}, clearing field`);
-        return null;
+        // insert (make sure columns and values line up)
+        scheduleChanges = Object.keys(dbFields);
+        await pool.query(
+          `INSERT INTO "Maintenance_schedule"
+           (maintenance_id, repeat_kind, interval, weekdays, monthday, week_of_month, weekday, month, until, pattern_variant, rrule)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [
+            id,
+            frequency,
+            interval,
+            weekdays,
+            finalMonthlyDay,
+            finalWeekOfMonth,
+            finalWeekday,
+            yearly_month,
+            recurrence_end_date,
+            patternVariant,
+            rruleValue,
+          ]
+        );
       }
-    };
 
-    // ✅ Include all file fields (added parameter_studies here)
-    const fileFields = [
-      "machineimagefile",
-      "files_3d",
-      "files_2d",
-      "spare_parts_list",
-      "electrical_diagram",
-      "cpk_data",
-      "validation_document",
-      "parameter_studies", // ✅ Added
-      "plc_program",
-      "hmi_program",
-      "other_programs",
-      "machine_manual",
-      "operation_instruction",
-    ];
-
-    const fileUpdates = {};
-    fileFields.forEach((field) => {
-      const value = getFileValue(field);
-      if (value !== undefined) {
-        fileUpdates[field] = value;
-      }
-    });
-
-    console.log("File updates:", fileUpdates);
-
-    try {
-      await pool.query("BEGIN");
-
-      const fileSetClauses = Object.keys(fileUpdates).map((field, idx) => {
-        return `${field} = $${24 + idx + 1}`;
-      });
-
-      const updateQuery = `
-        UPDATE "Machines" SET
-          machine_ref = $1, machine_name = $2, brand = $3, model = $4, 
-          product_line = $5, production_line = $6, station = $7,
-          consumables = $8, fixture_numbers = $9, 
-          gage_numbers = $10, tooling_numbers = $11, 
-          production_rate = $12,
-          air_needed = $13, air_pressure = $14, air_pressure_unit = $15, 
-          voltage = $16, phases = $17, amperage = $18, frequency = $19, 
-          water_cooling = $20, water_temp = $21, water_temp_unit = $22, 
-          dust_extraction = $23, fume_extraction = $24
-          ${fileSetClauses.length > 0 ? "," + fileSetClauses.join(", ") : ""}
-        WHERE machine_id = $${25 + Object.keys(fileUpdates).length}
-        RETURNING *
-      `;
-
-      const queryParams = [
-        machine_ref,
-        machine_name,
-        brand,
-        model,
-        product_line,
-        production_line,
-        station,
-        consumables,
-        fixture_numbers,
-        gage_numbers,
-        tooling_numbers,
-        production_rate,
-        air_needed,
-        air_pressure,
-        air_pressure_unit,
-        voltage,
-        phases,
-        amperage,
+      recurrenceData = {
         frequency,
-        water_cooling,
-        water_temp,
-        water_temp_unit,
-        dust_extraction,
-        fume_extraction,
-        ...Object.values(fileUpdates),
-        id,
-      ];
+        interval,
+        weekdays,
+        monthly_day: finalMonthlyDay,
+        monthly_ordinal: finalWeekOfMonth,
+        monthly_weekday: finalWeekday,
+        yearly_month,
+        recurrence_end_date,
+        pattern_variant: patternVariant,
+      };
+    } else {
+      // no recurrence -> delete any existing schedule
+      const existingSchedule = await pool.query(
+        `SELECT * FROM "Maintenance_schedule" WHERE maintenance_id = $1`,
+        [id]
+      );
+      if (existingSchedule.rowCount > 0) {
+        scheduleChanges = ["recurrence_removed"];
+        await pool.query(`DELETE FROM "Maintenance_schedule" WHERE maintenance_id = $1`, [id]);
+      }
+    }
 
-      console.log("Update Query:", updateQuery);
-      console.log("Query Params:", queryParams);
+    // Step 4: fetch updated main row
+    const newResult = await pool.query(
+      `SELECT * FROM "PreventiveMaintenance" WHERE maintenance_id = $1`,
+      [id]
+    );
+    const newData = newResult.rows[0];
 
-      const updatedResult = await pool.query(updateQuery, queryParams);
-      const updatedMachine = updatedResult.rows[0];
-      const machine_id = updatedMachine.machine_id;
-      const parsedUserId = user_id ? parseInt(user_id, 10) : null;
+    // Step 5: detect changes
+    const changedFields = [];
+    for (const key in newData) {
+      if (
+        key !== "creation_date" &&
+        key !== "maintenance_id" &&
+        JSON.stringify(newData[key]) !== JSON.stringify(oldData[key])
+      ) {
+        changedFields.push(key);
+      }
+    }
 
-      // ✅ History table insert (parameter_studies included)
+    // Add schedule changes mapped to frontend names
+    if (scheduleChanges.length > 0) {
+      const fieldMapping = {
+        repeat_kind: "frequency",
+        interval: "interval",
+        weekdays: "weekdays",
+        monthday: "monthly_day",
+        week_of_month: "monthly_ordinal",
+        weekday: "monthly_weekday",
+        month: "yearly_month",
+        until: "recurrence_end_date",
+        recurrence_removed: "recurrence_removed",
+      };
+      scheduleChanges.forEach((dbField) => {
+        const frontendField = fieldMapping[dbField];
+        if (frontendField && !changedFields.includes(frontendField)) {
+          changedFields.push(frontendField);
+        }
+      });
+    }
+
+    // Step 6: write history if any changes
+    if (changedFields.length > 0) {
       await pool.query(
-        `INSERT INTO "Machines_Hist" 
-          (machine_id, machine_ref, machine_name, brand, model, product_line, production_line, station,
-           machineimagefile, files_3d, files_2d, spare_parts_list, electrical_diagram, plc_program, 
-           hmi_program, other_programs, machine_manual, operation_instruction, consumables, fixture_numbers, 
-           gage_numbers, tooling_numbers, cpk_data, production_rate, validation_document, parameter_studies, 
-           action_type, action_date, user_id, air_needed, air_pressure, air_pressure_unit, voltage, phases, 
-           amperage, frequency, water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction)
-         VALUES 
-           ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 
-            $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)`,
+        `INSERT INTO "PreventiveMaintenance_Hist" 
+         (maintenance_id, machine_id, maintenance_type, task_name, task_description, 
+          start_date, end_date, completed_date, task_status, assigned_to, 
+          creator, creation_date, action_type, action_date, user_id,
+          frequency, "interval", weekdays, monthly_day, monthly_ordinal, monthly_weekday, yearly_month, recurrence_end_date)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+                 $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
         [
-          machine_id,
-          machine_ref,
-          machine_name,
-          brand,
-          model,
-          product_line,
-          production_line,
-          station,
-          updatedMachine.machineimagefile,
-          updatedMachine.files_3d,
-          updatedMachine.files_2d,
-          updatedMachine.spare_parts_list,
-          updatedMachine.electrical_diagram,
-          updatedMachine.plc_program,
-          updatedMachine.hmi_program,
-          updatedMachine.other_programs,
-          updatedMachine.machine_manual,
-          updatedMachine.operation_instruction,
-          consumables,
-          fixture_numbers,
-          gage_numbers,
-          tooling_numbers,
-          updatedMachine.cpk_data,
-          production_rate,
-          updatedMachine.validation_document,
-          updatedMachine.parameter_studies, // ✅ included here
+          newData.maintenance_id,
+          newData.machine_id,
+          newData.maintenance_type,
+          newData.task_name,
+          newData.task_description,
+          newData.start_date,
+          newData.end_date,
+          newData.completed_date,
+          newData.task_status,
+          newData.assigned_to,
+          newData.creator,
+          newData.creation_date,
           "UPDATE",
           new Date(),
-          parsedUserId,
-          air_needed,
-          air_pressure,
-          air_pressure_unit,
-          voltage,
-          phases,
-          amperage,
-          frequency,
-          water_cooling,
-          water_temp,
-          water_temp_unit,
-          dust_extraction,
-          fume_extraction,
+          user_id,
+          recurrenceData.frequency || null,
+          recurrenceData.interval || null,
+          recurrenceData.weekdays || null,
+          recurrenceData.monthly_day || null,
+          recurrenceData.monthly_ordinal || null,
+          recurrenceData.monthly_weekday || null,
+          recurrenceData.yearly_month || null,
+          recurrenceData.recurrence_end_date || null,
         ]
       );
-
-      await pool.query("COMMIT");
-      res.status(200).json(updatedMachine);
-    } catch (error) {
-      await pool.query("ROLLBACK");
-      console.error("Error updating machine:", error);
-      res.status(500).json({ message: "Error updating machine", error: error.message });
     }
-  }
-);
 
+    res.json({
+      message:
+        changedFields.length > 0
+          ? "Maintenance updated and history recorded"
+          : "Maintenance updated (no changes detected)",
+      changedFields,
+    });
+  } catch (err) {
+    console.error("Error updating maintenance:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 
 
