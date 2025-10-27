@@ -213,6 +213,7 @@ router.post(
         dust_extraction,
         fume_extraction,
         powerunits,
+        year,
         user_id,
       } = req.body;
 
@@ -243,10 +244,10 @@ router.post(
           machineimagefile, files_3d, files_2d, spare_parts_list, electrical_diagram, plc_program, hmi_program, 
           other_programs, machine_manual, operation_instruction, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
           cpk_data, production_rate, validation_document, parameter_studies, air_needed, air_pressure, air_pressure_unit, 
-          voltage, phases, amperage, frequency, water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction, powerunits) 
+          voltage, phases, amperage, frequency, water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction, powerunits,year) 
         VALUES 
           ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 
-           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38) 
+           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39) 
         RETURNING machine_id`,
         [
           machine_ref,
@@ -286,7 +287,8 @@ router.post(
           water_temp_unit,
           dust_extraction,
           fume_extraction,
-          powerunits
+          powerunits,
+          year
         ]
       );
 
@@ -301,10 +303,10 @@ router.post(
           other_programs, machine_manual, operation_instruction, consumables, fixture_numbers, gage_numbers, tooling_numbers, 
           cpk_data, production_rate, validation_document, parameter_studies, action_type, action_date, 
           user_id, air_needed, air_pressure, air_pressure_unit, voltage, phases, amperage, frequency, 
-          water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction, powerunits) 
+          water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction, powerunits, year) 
         VALUES 
           ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42)`,
+           $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43)`,
         [
           machine_id,
           machine_ref,
@@ -347,7 +349,8 @@ router.post(
           water_temp_unit,
           dust_extraction,
           fume_extraction,
-          powerunits
+          powerunits,
+          year
         ]
       );
 
@@ -364,6 +367,7 @@ router.post(
     }
   }
 );
+
 
 router.post("/stations", async (req, res) => {
   const { station, description, machine_id, user_id } = req.body;
@@ -566,7 +570,7 @@ router.put(
     { name: "electrical_diagram", maxCount: 1 },
     { name: "cpk_data", maxCount: 1 },
     { name: "validation_document", maxCount: 1 },
-    { name: "parameter_studies", maxCount: 1 }, // ✅ Added as file field
+    { name: "parameter_studies", maxCount: 1 },
     { name: "plc_program", maxCount: 1 },
     { name: "hmi_program", maxCount: 1 },
     { name: "other_programs", maxCount: 1 },
@@ -577,9 +581,10 @@ router.put(
     const { id } = req.params;
 
     const cleanedBody = Object.fromEntries(
-      Object.entries(req.body).map(([key, value]) => {
-        return [key, value === "null" ? null : value];
-      })
+      Object.entries(req.body).map(([key, value]) => [
+        key,
+        value === "null" ? null : value,
+      ])
     );
 
     const {
@@ -607,38 +612,28 @@ router.put(
       water_temp_unit,
       dust_extraction,
       fume_extraction,
+      powerunits, // ✅ Added
+      year, // ✅ Added
       user_id,
     } = cleanedBody;
 
     console.log("Cleaned Body:", cleanedBody);
     console.log("Files received:", req.files);
 
-    // ✅ Helper function for file handling
+    // Helper for files
     const getFileValue = (field) => {
       const action = req.body[`${field}_action`];
-
-      console.log(
-        `Processing ${field}: action=${action}, hasFile=${!!(
-          req.files && req.files[field]
-        )}`
-      );
-
       if (req.files && req.files[field]) {
-        console.log(`New file for ${field}:`, req.files[field][0].filename);
         return req.files[field][0].filename;
       } else if (action === "delete") {
-        console.log(`Deleting file for ${field}`);
         return null;
       } else if (action === "keep") {
-        console.log(`Keeping existing file for ${field}`);
         return undefined;
       } else {
-        console.log(`No action specified for ${field}, clearing field`);
         return null;
       }
     };
 
-    // ✅ Include all file fields (added parameter_studies here)
     const fileFields = [
       "machineimagefile",
       "files_3d",
@@ -647,7 +642,7 @@ router.put(
       "electrical_diagram",
       "cpk_data",
       "validation_document",
-      "parameter_studies", // ✅ Added
+      "parameter_studies",
       "plc_program",
       "hmi_program",
       "other_programs",
@@ -663,14 +658,12 @@ router.put(
       }
     });
 
-    console.log("File updates:", fileUpdates);
-
     try {
       await pool.query("BEGIN");
 
-      const fileSetClauses = Object.keys(fileUpdates).map((field, idx) => {
-        return `${field} = $${24 + idx + 1}`;
-      });
+      const fileSetClauses = Object.keys(fileUpdates).map(
+        (field, idx) => `${field} = $${26 + idx + 1}`
+      );
 
       const updateQuery = `
         UPDATE "Machines" SET
@@ -682,9 +675,10 @@ router.put(
           air_needed = $13, air_pressure = $14, air_pressure_unit = $15, 
           voltage = $16, phases = $17, amperage = $18, frequency = $19, 
           water_cooling = $20, water_temp = $21, water_temp_unit = $22, 
-          dust_extraction = $23, fume_extraction = $24
+          dust_extraction = $23, fume_extraction = $24,
+          powerunits = $25, year = $26
           ${fileSetClauses.length > 0 ? "," + fileSetClauses.join(", ") : ""}
-        WHERE machine_id = $${25 + Object.keys(fileUpdates).length}
+        WHERE machine_id = $${27 + Object.keys(fileUpdates).length}
         RETURNING *
       `;
 
@@ -713,30 +707,29 @@ router.put(
         water_temp_unit,
         dust_extraction,
         fume_extraction,
+        powerunits,
+        year,
         ...Object.values(fileUpdates),
         id,
       ];
-
-      console.log("Update Query:", updateQuery);
-      console.log("Query Params:", queryParams);
 
       const updatedResult = await pool.query(updateQuery, queryParams);
       const updatedMachine = updatedResult.rows[0];
       const machine_id = updatedMachine.machine_id;
       const parsedUserId = user_id ? parseInt(user_id, 10) : null;
 
-      // ✅ History table insert (parameter_studies included)
+      // ✅ Insert into history table (add powerunits & year)
       await pool.query(
         `INSERT INTO "Machines_Hist" 
           (machine_id, machine_ref, machine_name, brand, model, product_line, production_line, station,
            machineimagefile, files_3d, files_2d, spare_parts_list, electrical_diagram, plc_program, 
            hmi_program, other_programs, machine_manual, operation_instruction, consumables, fixture_numbers, 
            gage_numbers, tooling_numbers, cpk_data, production_rate, validation_document, parameter_studies, 
-           action_type, action_date, user_id, air_needed, air_pressure, air_pressure_unit, voltage, phases, 
-           amperage, frequency, water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction)
+           powerunits, year, action_type, action_date, user_id, air_needed, air_pressure, air_pressure_unit, 
+           voltage, phases, amperage, frequency, water_cooling, water_temp, water_temp_unit, dust_extraction, fume_extraction)
          VALUES 
            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 
-            $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)`,
+            $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43)`,
         [
           machine_id,
           machine_ref,
@@ -763,7 +756,9 @@ router.put(
           updatedMachine.cpk_data,
           production_rate,
           updatedMachine.validation_document,
-          updatedMachine.parameter_studies, // ✅ included here
+          updatedMachine.parameter_studies,
+          powerunits,
+          year,
           "UPDATE",
           new Date(),
           parsedUserId,
