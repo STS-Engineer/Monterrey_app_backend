@@ -1583,9 +1583,12 @@ router.get('/maintenance', async (req, res) => {
         pm.task_description,
         pm.completed_date,
         pm.assigned_to,
+        u_assigned.email AS assigned_to_email,
         pm.creator,
+        u_creator.email AS creator_email,
         pm.task_status,
         pm.machine_id,
+        m.machine_ref,
         ms.repeat_kind AS recurrence,
         ms.interval,
         ms.weekdays,
@@ -1598,13 +1601,19 @@ router.get('/maintenance', async (req, res) => {
       FROM "PreventiveMaintenance" pm
       LEFT JOIN "Maintenance_schedule" ms
         ON pm.maintenance_id = ms.maintenance_id
+      LEFT JOIN "User" u_assigned
+        ON pm.assigned_to = u_assigned.user_id
+      LEFT JOIN "User" u_creator
+        ON pm.creator = u_creator.user_id
+      LEFT JOIN "Machines" m
+        ON pm.machine_id = m.machine_id
       ORDER BY pm.start_date DESC
     `);
 
     const events = result.rows.map(event => ({
       ...event,
-      start_date: event.start_date.toISOString(),
-      end_date: event.end_date.toISOString(),
+      start_date: event.start_date?.toISOString(),
+      end_date: event.end_date?.toISOString(),
       recurrence_end_date: event.recurrence_end_date ? event.recurrence_end_date.toISOString() : null
     }));
 
@@ -1614,6 +1623,7 @@ router.get('/maintenance', async (req, res) => {
     res.status(500).json({ message: "Error fetching maintenance events" });
   }
 });
+
 
 
 
