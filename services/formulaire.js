@@ -1371,9 +1371,403 @@ function normalizeDate(dateInput) {
 }
 
 
+async function generateAndSendPdf(
+  maintenance_id,
+  machine_id,
+  maintenance_type,
+  task_name,
+  task_description,
+  assigned_to,
+  creator,
+  start_date,
+  end_date
+) {
+  try {
+    // === Fetch related data ===
+    const assignedUser = await pool.query('SELECT email FROM "User" WHERE user_id = $1', [assigned_to]);
+    const creatorUser = await pool.query('SELECT email FROM "User" WHERE user_id = $1', [creator]);
+    const machine = await pool.query('SELECT machine_name FROM "Machines" WHERE machine_id = $1', [machine_id]);
+    const schedule = await pool.query('SELECT * FROM "Maintenance_schedule" WHERE maintenance_id = $1 LIMIT 1', [maintenance_id]);
+
+    const assigned_email = assignedUser.rows[0]?.email;
+    const creator_email = creatorUser.rows[0]?.email;
+    const machine_name = machine.rows[0]?.machine_name || 'Unknown Machine';
+    const scheduleData = schedule.rows[0];
+
+    const recurrenceText = formatRecurrence(scheduleData);
+
+    // === Generate PDF ===
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({
+        margin: 50,
+        size: 'A4',
+        info: {
+          Title: `Maintenance Report - ${task_name}`,
+          Author: 'AVOCARBON Maintenance System',
+          Subject: `Maintenance Report for ${task_name}`,
+        }
+      });
+
+      const pdfChunks = [];
+
+      doc.on('data', (chunk) => pdfChunks.push(chunk));
+      doc.on('end', async () => {
+        try {
+          const pdfBuffer = Buffer.concat(pdfChunks);
+
+          // Save to uploads directory
+          const uploadsDir = path.join(__dirname, '..', 'uploads');
+          if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+          const pdfPath = path.join(uploadsDir, `maintenance-report-${maintenance_id}.pdf`);
+          fs.writeFileSync(pdfPath, pdfBuffer);
+          console.log(`PDF saved to: ${pdfPath}`);
+
+          // Send email
+          if (assigned_email) {
+            await sendEmailWithPdf(
+              assigned_email,
+              task_name,
+              maintenance_type,
+              task_description,
+              machine_name,
+              start_date,
+              end_date,
+              assigned_email,
+              creator_email,
+              pdfBuffer,
+              maintenance_id,
+              recurrenceText
+            );
+          }
+
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
+
+      doc.on('error', reject);
+
+      // === PDF DESIGN ===
+      const primaryColor = '#2563eb';
+      const secondaryColor = '#64748b';
+      const borderColor = '#e2e8f0';
+      const backgroundColor = '#f8fafc';
+
+      // Header
+      doc.rect(0, 0, doc.page.width, 120).fill(primaryColor);
+      doc.fillColor('white').fontSize(24).font('Helvetica-Bold').text('AVOCARBON', 50, 40);
+      doc.fontSize(14).font('Helvetica').text('Maintenance System', 50, 70);
+      doc.fontSize(18).font('Helvetica-Bold').text('MAINTENANCE REPORT', doc.page.width - 250, 80, { align: 'right' });
+
+      const contentStartY = 150;
+
+      // Task Overview
+      doc.roundedRect(50, contentStartY, doc.page.width - 100, 80, 8)
+         .fillColor(backgroundColor)
+         .fill()
+         .strokeColor(borderColor)
+         .stroke();
+
+      doc.fillColor(primaryColor).fontSize(16).font('Helvetica-Bold').text('TASK OVERVIEW', 70, contentStartY + 20);
+      doc.fillColor('#1e293b').fontSize(20).font('Helvetica-Bold').text(task_name, 70, contentStartY + 45);
+
+      const columnWidth = (doc.page.width - 150) / 2;
+      let currentY = contentStartY + 120;
+
+      // Left column
+      doc.fillColor(primaryColor).fontSize(14).font('Helvetica-Bold').text('BASIC INFORMATION', 50, currentY);
+      currentY += 30;
+      doc.roundedRect(50, currentY, columnWidth, 180, 6).fillColor('#ffffff').fill().strokeColor(borderColor).stroke();
+
+      const addInfoItem = (label, value, x, y, width) => {
+        doc.fillColor(secondaryColor).fontSize(10).font('Helvetica').text(label, x + 20, y);
+        doc.fillColor('#1e293b').fontSize(11).font('Helvetica-Bold').text(value || 'N/A', x + 20, y + 15, { width: width - 40 });
+        return y + 35;
+      };
+
+      let infoY = currentY + 20;
+      infoY = addInfoItem('MAINTENANCE ID', `#${maintenance_id}`, 50, infoY, columnWidth);
+      infoY = addInfoItem('MAINTENANCE TYPE', maintenance_type, 50, infoY, columnWidth);
+      infoY = addInfoItem('STATUS', 'In Progress', 50, infoY, columnWidth);
+      infoY = addInfoItem('MACHINE', machine_name, 50, infoY, columnWidth);
+      infoY = addInfoItem('CREATED BY', creator_email, 50, infoY, columnWidth);
+
+      // Right column
+      doc.fillColor(primaryColor).fontSize(14).font('Helvetica-Bold').text('SCHEDULE & ASSIGNMENT', 50 + columnWidth + 50, currentY);
+      currentY += 30;
+      doc.roundedRect(50 + columnWidth + 50, currentY, columnWidth, 180, 6).fillColor('#ffffff').fill().strokeColor(borderColor).stroke();
+
+      let rightY = currentY + 20;
+      rightY = addInfoItem('START DATE', start_date.toLocaleString(), 50 + columnWidth + 50, rightY, columnWidth);
+      rightY = addInfoItem('END DATE', end_date.toLocaleString(), 50 + columnWidth + 50, rightY, columnWidth);
+      rightY = addInfoItem('ASSIGNED TO', assigned_email, 50 + columnWidth + 50, rightY, columnWidth);
+      rightY = addInfoItem('RECURRENCE', recurrenceText, 50 + columnWidth + 50, rightY, columnWidth);
+
+      currentY += 220;
+
+      // Description
+      doc.fillColor(primaryColor).fontSize(14).font('Helvetica-Bold').text('TASK DESCRIPTION', 50, currentY);
+      currentY += 30;
+      doc.roundedRect(50, currentY, doc.page.width - 100, 120, 6).fillColor('#ffffff').fill().strokeColor(borderColor).stroke();
+      doc.fillColor('#475569').fontSize(11).font('Helvetica').text(task_description, 70, currentY + 20, {
+        width: doc.page.width - 140,
+        align: 'left',
+        lineGap: 5
+      });
+
+      currentY += 150;
+
+      // Footer
+      const footerY = doc.page.height - 50;
+      doc.strokeColor(borderColor).moveTo(50, footerY - 20).lineTo(doc.page.width - 50, footerY - 20).stroke();
+      doc.fillColor(secondaryColor).fontSize(9).text(`Generated on: ${new Date().toLocaleString()}`, 50, footerY - 10);
+      doc.text('AVOCARBON Maintenance System - Confidential', doc.page.width - 50, footerY - 10, { align: 'right' });
+
+      doc.end();
+    });
+
+  } catch (error) {
+    console.error('Error in PDF generation:', error);
+    throw error;
+  }
+}
+
+// === Helper to format recurrence ===
+function formatRecurrence(schedule) {
+  if (!schedule || schedule.repeat_kind === 'none') return 'Does not repeat';
+  const { repeat_kind, interval, weekdays, monthday, month } = schedule;
+
+  switch (repeat_kind) {
+    case 'daily':
+      return `Repeats every ${interval} day(s)`;
+    case 'weekly':
+      const days = (weekdays || []).map(d =>
+        ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d]
+      ).join(', ');
+      return `Repeats every ${interval} week(s) on ${days}`;
+    case 'monthly':
+      return monthday
+        ? `Repeats monthly on day ${monthday}`
+        : 'Repeats monthly (pattern variant)';
+    case 'yearly':
+      return month
+        ? `Repeats yearly in month ${month} (interval: ${interval})`
+        : 'Repeats yearly';
+    default:
+      return 'Does not repeat';
+  }
+}
+
+
+// Updated email function with modern HTML design
+async function sendEmailWithPdf(
+  assigned_email,
+  task_name,
+  maintenance_type,
+  task_description,
+  machine_name,
+  start_date,
+  end_date,
+  assignedToEmail,
+  creator_email,
+  pdfBuffer,
+  maintenance_id,
+  recurrenceText
+) {
+  const transporter = nodemailer.createTransport({
+    host: "avocarbon-com.mail.protection.outlook.com",
+    port: 25,
+    secure: false,
+    auth: {
+      user: "administration.STS@avocarbon.com",
+      pass: "shnlgdyfbcztbhxn",
+    },
+  });
+
+  const mailOptions = {
+    from: "administration.STS@avocarbon.com",
+    to: assigned_email,
+    subject: `New Maintenance Task Assigned - ${task_name}`,
+html: `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <meta charset="utf-8">
+    <style>
+      body {
+        font-family: 'Segoe UI', Arial, sans-serif;
+        background: #f8fafc;
+        color: #334155;
+        margin: 0;
+        padding: 0;
+      }
+
+      .container {
+        max-width: 600px;
+        margin: 40px auto;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        overflow: hidden;
+      }
+
+      .header {
+        background: linear-gradient(135deg, #1d4ed8, #2563eb);
+        padding: 30px 20px;
+        text-align: center;
+      }
+
+      .header img {
+        width: 120px;
+        height: auto;
+        margin-bottom: 10px;
+      }
+
+      .header h1 {
+        font-size: 22px;
+        font-weight: 700;
+        color: #ffffff;
+        margin: 0;
+        letter-spacing: 0.5px;
+      }
+
+      .header p {
+        color: #e0e7ff;
+        margin: 4px 0 0;
+        font-size: 14px;
+      }
+
+      .content {
+        padding: 40px 30px;
+      }
+
+      .section-title {
+        color: #2563eb;
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #e2e8f0;
+        padding-bottom: 10px;
+      }
+
+      .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+
+      .info-label {
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+
+      .info-value {
+        color: #1e293b;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .description-box {
+        background: #f8fafc;
+        border-radius: 8px;
+        padding: 20px;
+        border-left: 4px solid #2563eb;
+        margin-top: 20px;
+      }
+
+      .footer {
+        background: #1e293b;
+        color: white;
+        padding: 25px 30px;
+        text-align: center;
+        font-size: 12px;
+      }
+
+      @media (max-width: 600px) {
+        .info-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <!-- HEADER WITH LOGO -->
+      <div class="header">
+        <img src="https://media.licdn.com/dms/image/v2/D4E0BAQGYVmAPO2RZqQ/company-logo_200_200/company-logo_200_200/0/1689240189455/avocarbon_group_logo?e=2147483647&v=beta&t=nZNCXd3ypoMFQnQMxfAZrljyNBbp4E5HM11Y1yl9_L0" 
+             alt="AVOCARBON Logo" />
+        <h1>Maintenance System</h1>
+ 
+      </div>
+
+      <!-- CONTENT -->
+      <div class="content">
+        <div class="section-title">Maintenance Task Details</div>
+
+        <div class="info-grid">
+          <div>
+            <div class="info-label">Task Name</div>
+            <div class="info-value">${task_name}</div>
+          </div>
+          <div>
+            <div class="info-label">Maintenance Type</div>
+            <div class="info-value">${maintenance_type}</div>
+          </div>
+          <div>
+            <div class="info-label">Machine</div>
+            <div class="info-value">${machine_name}</div>
+          </div>
+          <div>
+            <div class="info-label">Recurrence</div>
+            <div class="info-value">${recurrenceText}</div>
+          </div>
+          <div>
+            <div class="info-label">Start Date</div>
+            <div class="info-value">${start_date.toLocaleString()}</div>
+          </div>
+          <div>
+            <div class="info-label">End Date</div>
+            <div class="info-value">${end_date.toLocaleString()}</div>
+          </div>
+          <div>
+            <div class="info-label">Assigned To</div>
+            <div class="info-value">${assigned_email}</div>
+          </div>
+          <div>
+            <div class="info-label">Created By</div>
+            <div class="info-value">${creator_email}</div>
+          </div>
+        </div>
+
+        <div class="description-box">
+          <div class="info-label">Task Description</div>
+          <div class="info-value">${task_description}</div>
+        </div>
+      </div>
+
+      <!-- FOOTER -->
+      <div class="footer">
+        <p>AVOCARBON Maintenance System | Automated Notification</p>
+        <p>&copy; ${new Date().getFullYear()} AVOCARBON. All rights reserved.</p>
+      </div>
+    </div>
+  </body>
+  </html>
+`,
+
+  };
+
+  await transporter.sendMail(mailOptions);
+}
+
+
+
 
 // Create a maintenance entry
-
 router.post('/maintenance', async (req, res) => {
   const {
     maintenance_type,
@@ -1528,6 +1922,15 @@ await pool.query(`
         user_id
       ]
     );
+
+    // ✅ AUTOMATICALLY GENERATE PDF AND SEND EMAIL
+    try {
+      await generateAndSendPdf(maintenance_id, machine_id, maintenance_type, task_name, task_description, assigned_to, creator, normalizedStartDate, normalizedEndDate);
+      console.log(`PDF generated and email sent for maintenance task ${maintenance_id}`);
+    } catch (pdfError) {
+      console.error('Error generating PDF or sending email:', pdfError);
+      // Don't fail the entire request if PDF generation fails
+    }
 
     await pool.query('COMMIT');
 
