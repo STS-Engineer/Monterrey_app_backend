@@ -1397,6 +1397,7 @@ async function generateAndSendPdf(
     const scheduleData = schedule.rows[0];
 
     const recurrenceText = formatRecurrence(scheduleData);
+    const until = schedule.rows[0].until;
 
     // === Generate PDF ===
     return new Promise((resolve, reject) => {
@@ -1438,7 +1439,8 @@ async function generateAndSendPdf(
               creator_email,
               pdfBuffer,
               maintenance_id,
-              recurrenceText
+              recurrenceText,
+              until,
             );
           }
 
@@ -1505,7 +1507,10 @@ async function generateAndSendPdf(
       rightY = addInfoItem('END DATE', end_date.toLocaleString(), 50 + columnWidth + 50, rightY, columnWidth);
       rightY = addInfoItem('ASSIGNED TO', assigned_email, 50 + columnWidth + 50, rightY, columnWidth);
       rightY = addInfoItem('RECURRENCE', recurrenceText, 50 + columnWidth + 50, rightY, columnWidth);
-
+      const formattedUntil = until
+     ? new Date(until).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })
+     : 'N/A';
+      rightY = addInfoItem('UNTIL', formattedUntil, 50 + columnWidth + 50, rightY, columnWidth);
       currentY += 220;
 
       // Description
@@ -1575,7 +1580,8 @@ async function sendEmailWithPdf(
   creator_email,
   pdfBuffer,
   maintenance_id,
-  recurrenceText
+  recurrenceText,
+  until
 ) {
   const transporter = nodemailer.createTransport({
     host: "avocarbon-com.mail.protection.outlook.com",
@@ -1726,6 +1732,10 @@ html: `
           <div>
             <div class="info-label">Recurrence</div>
             <div class="info-value">${recurrenceText}</div>
+          </div>
+          <div>
+            <div class="info-label">Recurrence-end_date</div>
+            <div class="info-value">${formattedUntil}</div>
           </div>
           <div>
             <div class="info-label">Start Date</div>
