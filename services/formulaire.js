@@ -1440,7 +1440,7 @@ async function generateAndSendPdf(
               pdfBuffer,
               maintenance_id,
               recurrenceText,
-              until,
+              until
             );
           }
 
@@ -1592,6 +1592,10 @@ async function sendEmailWithPdf(
       pass: "shnlgdyfbcztbhxn",
     },
   });
+
+  const formattedUntil = until
+    ? new Date(until).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })
+    : 'N/A';
 
   const mailOptions = {
     from: "administration.STS@avocarbon.com",
