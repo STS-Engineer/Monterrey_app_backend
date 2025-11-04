@@ -1743,15 +1743,6 @@ html: `
              alt="AVOCARBON Logo" />
         <div class="header-title">
           <h1>Maintenance System</h1>
-          <span class="status-badge ${
-            task_status === 'In Progress'
-              ? 'status-in-progress'
-              : task_status === 'Pending Review'
-              ? 'status-pending-review'
-              : task_status === 'Completed'
-              ? 'status-completed'
-              : ''
-          }">${task_status}</span>
         </div>
         <p>New Maintenance Task Assigned</p>
       </div>
