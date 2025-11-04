@@ -1613,6 +1613,17 @@ html: `
         padding: 0;
       }
 
+       .hello-text {
+        background: #e0f2fe;
+        color: #0c4a6e;
+        display: inline-block;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-size: 15px;
+        font-weight: 500;
+        margin-bottom: 25px;
+      }
+
       .container {
         max-width: 600px;
         margin: 40px auto;
@@ -1736,6 +1747,11 @@ html: `
     </style>
   </head>
   <body>
+
+   <div class="hello-text">
+      Hello, you have been assigned to a new task.
+    </div>
+
     <div class="container">
       <!-- HEADER WITH LOGO -->
       <div class="header">
