@@ -4,10 +4,12 @@ const pool = require('../db');
 const bcrypt= require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
-const path = require('path');
 const { getIo, getConnectedUsers } = require('../socketManager');
 const nodemailer = require('nodemailer');
 const QRCode = require("qrcode");
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const path = require('path');
 
 // Middleware to authenticate and extract user from JWT
 const authenticate = (req, res, next) => {
