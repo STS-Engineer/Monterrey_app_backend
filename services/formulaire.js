@@ -1372,7 +1372,6 @@ function normalizeDate(dateInput) {
   return d;
 }
 
-
 async function generateAndSendPdf(
   maintenance_id,
   machine_id,
@@ -1382,7 +1381,8 @@ async function generateAndSendPdf(
   assigned_to,
   creator,
   start_date,
-  end_date
+  end_date,
+  task_status
 ) {
   try {
     // === Fetch related data ===
@@ -1440,7 +1440,8 @@ async function generateAndSendPdf(
               pdfBuffer,
               maintenance_id,
               recurrenceText,
-              until
+              until,
+              task_status
             );
           }
 
@@ -1507,10 +1508,7 @@ async function generateAndSendPdf(
       rightY = addInfoItem('END DATE', end_date.toLocaleString(), 50 + columnWidth + 50, rightY, columnWidth);
       rightY = addInfoItem('ASSIGNED TO', assigned_email, 50 + columnWidth + 50, rightY, columnWidth);
       rightY = addInfoItem('RECURRENCE', recurrenceText, 50 + columnWidth + 50, rightY, columnWidth);
-      const formattedUntil = until
-     ? new Date(until).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })
-     : 'N/A';
-      rightY = addInfoItem('UNTIL', formattedUntil, 50 + columnWidth + 50, rightY, columnWidth);
+     rightY = addInfoItem('UNTIL', until, 50 + columnWidth + 50, rightY, columnWidth);
       currentY += 220;
 
       // Description
@@ -1581,7 +1579,8 @@ async function sendEmailWithPdf(
   pdfBuffer,
   maintenance_id,
   recurrenceText,
-  until
+  until,
+  task_status
 ) {
   const transporter = nodemailer.createTransport({
     host: "avocarbon-com.mail.protection.outlook.com",
@@ -1592,8 +1591,7 @@ async function sendEmailWithPdf(
       pass: "shnlgdyfbcztbhxn",
     },
   });
-
-  const formattedUntil = until
+    const formattedUntil = until
     ? new Date(until).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })
     : 'N/A';
 
@@ -1636,12 +1634,43 @@ html: `
         margin-bottom: 10px;
       }
 
+      .header-title {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
       .header h1 {
         font-size: 22px;
         font-weight: 700;
         color: #ffffff;
         margin: 0;
         letter-spacing: 0.5px;
+      }
+
+      .status-badge {
+        display: inline-block;
+        padding: 6px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 20px;
+        color: white;
+      }
+
+      /* Status colors */
+      .status-in-progress {
+        background-color: #facc15; /* Yellow */
+        color: #854d0e;
+      }
+
+      .status-pending-review {
+        background-color: #3b82f6; /* Blue */
+      }
+
+      .status-completed {
+        background-color: #22c55e; /* Green */
       }
 
       .header p {
@@ -1712,14 +1741,25 @@ html: `
       <div class="header">
         <img src="https://media.licdn.com/dms/image/v2/D4E0BAQGYVmAPO2RZqQ/company-logo_200_200/company-logo_200_200/0/1689240189455/avocarbon_group_logo?e=2147483647&v=beta&t=nZNCXd3ypoMFQnQMxfAZrljyNBbp4E5HM11Y1yl9_L0" 
              alt="AVOCARBON Logo" />
-        <h1>Maintenance System</h1>
- 
+        <div class="header-title">
+          <h1>Maintenance System</h1>
+          <span class="status-badge ${
+            task_status === 'In Progress'
+              ? 'status-in-progress'
+              : task_status === 'Pending Review'
+              ? 'status-pending-review'
+              : task_status === 'Completed'
+              ? 'status-completed'
+              : ''
+          }">${task_status}</span>
+        </div>
+        <p>New Maintenance Task Assigned</p>
       </div>
 
       <!-- CONTENT -->
       <div class="content">
         <div class="section-title">Maintenance Task Details</div>
-
+         
         <div class="info-grid">
           <div>
             <div class="info-label">Task Name</div>
@@ -1738,7 +1778,7 @@ html: `
             <div class="info-value">${recurrenceText}</div>
           </div>
           <div>
-            <div class="info-label">Recurrence-end_date</div>
+            <div class="info-label">Recurrence_end_date</div>
             <div class="info-value">${formattedUntil}</div>
           </div>
           <div>
@@ -1775,11 +1815,11 @@ html: `
   </html>
 `,
 
+
   };
 
   await transporter.sendMail(mailOptions);
 }
-
 
 
 
