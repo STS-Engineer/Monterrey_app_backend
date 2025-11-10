@@ -2091,7 +2091,44 @@ router.get('/maintenance', async (req, res) => {
 });
 
 
+//update task-link 
 
+router.put('/maintenance/:id', async (req, res) => {
+  const { id } = req.params;
+  const { task_link } = req.body;
+
+  try {
+    // Validate the ID
+    if (!id) {
+      return res.status(400).json({ message: "Maintenance ID is required" });
+    }
+
+    console.log(`Updating task_link for maintenance ID: ${id}`, { task_link });
+
+    // Update the task_link in the PreventiveMaintenance table
+    const result = await pool.query(
+      `UPDATE "PreventiveMaintenance" 
+       SET task_link = $1 
+       WHERE maintenance_id = $2 
+       RETURNING maintenance_id, task_name, task_link`,
+      [task_link, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Maintenance task not found" });
+    }
+
+    console.log("Update successful:", result.rows[0]);
+    
+    res.status(200).json({
+      message: "Task link updated successfully",
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error("Error updating task link:", err);
+    res.status(500).json({ message: "Error updating task link" });
+  }
+});
 
 router.get('/maintenancee', async (req, res) => {
   const { userId, role } = req.query;
