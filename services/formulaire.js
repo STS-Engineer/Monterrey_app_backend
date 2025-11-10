@@ -2063,7 +2063,8 @@ router.get('/maintenance', async (req, res) => {
         ms.weekday AS monthly_weekday,
         ms.pattern_variant,
         ms.month AS yearly_month,
-        ms.until AS recurrence_end_date
+        ms.until AS recurrence_end_date,
+        pm.task_link 
       FROM "PreventiveMaintenance" pm
       LEFT JOIN "Maintenance_schedule" ms
         ON pm.maintenance_id = ms.maintenance_id
