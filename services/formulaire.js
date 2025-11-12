@@ -2037,6 +2037,29 @@ await pool.query(`
   }
 });
 
+
+
+//update executor feedback 
+router.post('/maintenance/:id/executor-feedback', async (req, res) => {
+  try {
+    const { feedback, user_id } = req.body;
+    const { id } = req.params;
+
+    await pool.query(
+      `UPDATE "PreventiveMaintenance" 
+       SET executor_feedback = $1
+       WHERE maintenance_id = $2`,
+      [feedback, id]
+    );
+
+    res.status(200).json({ message: 'Feedback updated successfully.' });
+  } catch (error) {
+    console.error('Error saving feedback:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+
 router.get('/maintenance', async (req, res) => {
   try {
     const result = await pool.query(`
