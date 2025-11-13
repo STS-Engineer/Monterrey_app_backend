@@ -3029,7 +3029,7 @@ router.get('/maintenance/reviews/:demandId', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT r.demand_id, r.demand_date, r.response, r.feedback, r.response_date, 
-              p.maintenance_id, p.task_name, p.task_description, p.assigned_to, p.creator, p.machine_id, p.task_status
+              p.maintenance_id, p.task_name, p.task_description, p.assigned_to, p.creator, p.machine_id, p.task_status, p.executor_feedback
        FROM "Maintenance_task_reviews" r
        JOIN "PreventiveMaintenance" p ON r.maintenance_id = p.maintenance_id
        WHERE r.demand_id = $1`,
