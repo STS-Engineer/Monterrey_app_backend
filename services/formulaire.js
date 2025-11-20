@@ -1582,24 +1582,44 @@ async function sendEmailWithPdf(
   until,
   task_status
 ) {
-  const transporter = nodemailer.createTransport({
-    host: "avocarbon-com.mail.protection.outlook.com",
-    port: 25,
-    secure: false,
-    auth: {
-      user: "administration.STS@avocarbon.com",
-      pass: "shnlgdyfbcztbhxn",
-    },
-  });
-    const formattedUntil = until
+  // Check if email is Outlook/Avocarbon or Gmail
+  const isOutlookEmail = assigned_email.includes('@avocarbon') || assigned_email.includes('@outlook');
+  
+  let transporter;
+  
+  if (isOutlookEmail) {
+    // Outlook configuration
+    transporter = nodemailer.createTransport({
+      host: "avocarbon-com.mail.protection.outlook.com",
+      port: 25,
+      secure: false,
+      tls: { rejectUnauthorized: false }
+    });
+  } else {
+    // Gmail configuration
+    transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: 'stsa71544@gmail.com',
+        pass: 'omcl adpi bdyw pufn'
+      }
+    });
+  }
+
+  const formattedUntil = until
     ? new Date(until).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })
     : 'N/A';
 
+  // Set from email based on the service
+  const fromEmail = isOutlookEmail 
+    ? "administration.STS@avocarbon.com" 
+    : "stsa71544@gmail.com";
+
   const mailOptions = {
-    from: "administration.STS@avocarbon.com",
+    from: fromEmail,
     to: assigned_email,
     subject: `New Maintenance Task Assigned - ${task_name}`,
-html: `
+    html: `
   <!DOCTYPE html>
   <html>
   <head>
@@ -1611,17 +1631,6 @@ html: `
         color: #334155;
         margin: 0;
         padding: 0;
-      }
-
-       .hello-text {
-        background: #e0f2fe;
-        color: #0c4a6e;
-        display: inline-block;
-        padding: 12px 20px;
-        border-radius: 8px;
-        font-size: 15px;
-        font-weight: 500;
-        margin-bottom: 25px;
       }
 
       .container {
@@ -1747,11 +1756,6 @@ html: `
     </style>
   </head>
   <body>
-
-   <div class="hello-text">
-      Hello, you have been assigned to a new task.
-    </div>
-
     <div class="container">
       <!-- HEADER WITH LOGO -->
       <div class="header">
@@ -1822,10 +1826,15 @@ html: `
   </html>
 `,
 
-
   };
 
-  await transporter.sendMail(mailOptions);
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`Email sent successfully to ${assigned_email} using ${isOutlookEmail ? 'Outlook' : 'Gmail'} service`);
+  } catch (error) {
+    console.error('Error sending email:', error);
+    throw error;
+  }
 }
 
 
