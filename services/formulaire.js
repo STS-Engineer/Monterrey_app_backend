@@ -1851,20 +1851,22 @@ router.post('/maintenance', async (req, res) => {
     start_date,
     end_date,
     user_id,
+    machine_id, // ✅ Get machine_id from request body
+    task_status,
     // Recurrence fields
-    recurrence,        // 'none', 'daily', 'weekly', 'monthly', 'yearly'
-    interval,          // number
-    weekdays,          // array for weekly [1,3]
-    monthlyDay,        // for monthly by day (e.g., 15th)
-    monthlyMonth,      // month number if needed
-    monthlyOrdinal,    // 'first', 'second', etc
-    monthlyWeekday,    // 0-6 Sunday-Saturday
-    // 🔥 Yearly fields
-    yearlyMode,        // 'day' | 'weekday'
-    yearlyDay,         // for "day" mode (e.g., 15th)
-    yearlyMonth,       // 0–11
-    yearlyOrdinal,     // 'first', 'second', 'third', 'fourth', 'last'
-    yearlyWeekday,     // 0–6 (Sun–Sat)
+    recurrence,
+    interval,
+    weekdays,
+    monthlyDay,
+    monthlyMonth,
+    monthlyOrdinal,
+    monthlyWeekday,
+    // Yearly fields
+    yearlyMode,
+    yearlyDay,
+    yearlyMonth,
+    yearlyOrdinal,
+    yearlyWeekday,
     recurrence_end_date
   } = req.body;
 
@@ -1875,10 +1877,22 @@ router.post('/maintenance', async (req, res) => {
     const normalizedEndDate = normalizeDate(end_date);
     const normalizedUntilDate = recurrence_end_date ? normalizeDate(recurrence_end_date) : null;
 
-    // Fetch machine_id (temporary: always first machine)
-    const machineresult = await pool.query('SELECT machine_id FROM "Machines" LIMIT 1');
-    if (machineresult.rows.length === 0) throw new Error("No machine found");
-    const machine_id = machineresult.rows[0].machine_id;
+    // ✅ Validate machine_id is provided
+    if (!machine_id) {
+      await pool.query('ROLLBACK');
+      return res.status(400).json({ message: 'Machine ID is required' });
+    }
+
+    // ✅ Verify machine exists
+    const machineCheck = await pool.query(
+      'SELECT machine_id FROM "Machines" WHERE machine_id = $1',
+      [machine_id]
+    );
+    
+    if (machineCheck.rows.length === 0) {
+      await pool.query('ROLLBACK');
+      return res.status(404).json({ message: 'Machine not found' });
+    }
 
     // Insert into PreventiveMaintenance
     const maintenanceResult = await pool.query(
@@ -1887,12 +1901,12 @@ router.post('/maintenance', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) 
        RETURNING maintenance_id`,
       [
-        machine_id,
+        machine_id, // ✅ Use machine_id from request
         maintenance_type,
         task_name,
         task_description,
         completed_date,
-        'In progress',
+        task_status || 'In progress',
         assigned_to,
         creator,
         new Date(),
@@ -1903,73 +1917,68 @@ router.post('/maintenance', async (req, res) => {
 
     const maintenance_id = maintenanceResult.rows[0].maintenance_id;
 
-// --- Handle recurrence mapping ---
-const ordinals = { first: 1, second: 2, third: 3, fourth: 4, last: -1 };
+    // --- Handle recurrence mapping ---
+    const ordinals = { first: 1, second: 2, third: 3, fourth: 4, last: -1 };
 
-let week_of_month = null;
-let weekday = null;
-let month = null;
-let monthday = null;
-let pattern_variant = 'standard';
+    let week_of_month = null;
+    let weekday = null;
+    let month = null;
+    let monthday = null;
+    let pattern_variant = 'standard';
 
-// Monthly mapping
-if (recurrence === 'monthly') {
-  if (monthlyOrdinal && monthlyWeekday !== undefined) {
-    // Example: Second Tuesday → nth weekday mode
-    pattern_variant = 'monthly_nth';
-    week_of_month = ordinals[monthlyOrdinal.toLowerCase()] || null; // 2 for second
-    weekday = monthlyWeekday; // 0=Sunday, 1=Monday...
-    monthday = null; // must be null in this variant
-  } else if (monthlyDay) {
-    // Example: Every 10th → day-of-month mode
-    pattern_variant = 'standard';
-    monthday = monthlyDay; // 10
-    week_of_month = null;
-    weekday = null;
-  }
-}
+    // Monthly mapping
+    if (recurrence === 'monthly') {
+      if (monthlyOrdinal && monthlyWeekday !== undefined) {
+        pattern_variant = 'monthly_nth';
+        week_of_month = ordinals[monthlyOrdinal.toLowerCase()] || null;
+        weekday = monthlyWeekday;
+        monthday = null;
+      } else if (monthlyDay) {
+        pattern_variant = 'standard';
+        monthday = monthlyDay;
+        week_of_month = null;
+        weekday = null;
+      }
+    }
 
+    // Yearly mapping
+    if (recurrence === 'yearly') {
+      if (yearlyMode === 'day') {
+        pattern_variant = 'standard';
+        month = (yearlyMonth !== undefined ? yearlyMonth + 1 : normalizedStartDate.getMonth() + 1);
+        monthday = yearlyDay;
+        week_of_month = null;
+        weekday = null;
+      } else if (yearlyMode === 'weekday') {
+        pattern_variant = 'monthly_nth';
+        week_of_month = ordinals[yearlyOrdinal?.toLowerCase()] || null;
+        weekday = yearlyWeekday;
+        month = (yearlyMonth !== undefined ? yearlyMonth + 1 : normalizedStartDate.getMonth() + 1);
+        monthday = null;
+      }
+    }
 
-// Yearly mapping
-if (recurrence === 'yearly') {
-  if (yearlyMode === 'day') {
-    // Example: April 15 → month=4, monthday=15
-    pattern_variant = 'standard'; // yearly "day" = standard (day of month)
-    month = (yearlyMonth !== undefined ? yearlyMonth + 1 : normalizedStartDate.getMonth() + 1); // DB months 1–12
-    monthday = yearlyDay;
-    week_of_month = null;
-    weekday = null;
-  } else if (yearlyMode === 'weekday') {
-    // Example: Second Tuesday in January
-    pattern_variant = 'monthly_nth'; // yearly "weekday" = nth weekday of month
-    week_of_month = ordinals[yearlyOrdinal?.toLowerCase()] || null;
-    weekday = yearlyWeekday;
-    month = (yearlyMonth !== undefined ? yearlyMonth + 1 : normalizedStartDate.getMonth() + 1);
-    monthday = null;
-  }
-}
-
-// Insert into Maintenance_schedule
-await pool.query(`
-  INSERT INTO "Maintenance_schedule"
-  (maintenance_id, start_at, end_at, timezone, repeat_kind, interval, weekdays, monthday, month, week_of_month, weekday, pattern_variant, until, notes)
-  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-`, [
-  maintenance_id,
-  normalizedStartDate,
-  normalizedEndDate,
-  'Africa/Tunis',
-  recurrence || 'none',
-  interval || 1,
-  weekdays || null,
-  monthday,
-  month,
-  week_of_month,
-  weekday,
-  pattern_variant,
-  normalizedUntilDate,
-  task_description
-]);
+    // Insert into Maintenance_schedule
+    await pool.query(`
+      INSERT INTO "Maintenance_schedule"
+      (maintenance_id, start_at, end_at, timezone, repeat_kind, interval, weekdays, monthday, month, week_of_month, weekday, pattern_variant, until, notes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+    `, [
+      maintenance_id,
+      normalizedStartDate,
+      normalizedEndDate,
+      'Africa/Tunis',
+      recurrence || 'none',
+      interval || 1,
+      weekdays || null,
+      monthday,
+      month,
+      week_of_month,
+      weekday,
+      pattern_variant,
+      normalizedUntilDate,
+      task_description
+    ]);
 
     // PreventiveMaintenance_Hist insert
     await pool.query(
@@ -1985,7 +1994,7 @@ await pool.query(`
         normalizedStartDate,
         normalizedEndDate,
         completed_date,
-        'In progress',
+        task_status || 'In progress',
         assigned_to,
         creator,
         new Date(),
@@ -1995,13 +2004,12 @@ await pool.query(`
       ]
     );
 
-    // ✅ AUTOMATICALLY GENERATE PDF AND SEND EMAIL
+    // ✅ Generate PDF and send email
     try {
       await generateAndSendPdf(maintenance_id, machine_id, maintenance_type, task_name, task_description, assigned_to, creator, normalizedStartDate, normalizedEndDate);
       console.log(`PDF generated and email sent for maintenance task ${maintenance_id}`);
     } catch (pdfError) {
       console.error('Error generating PDF or sending email:', pdfError);
-      // Don't fail the entire request if PDF generation fails
     }
 
     await pool.query('COMMIT');
@@ -2012,7 +2020,7 @@ await pool.query(`
       maintenance_type,
       task_description,
       assigned_to,
-      task_status: 'In progress',
+      task_status: task_status || 'In progress',
       machine_id,
       start_date: normalizedStartDate.toISOString(),
       end_date: normalizedEndDate.toISOString(),
@@ -2042,11 +2050,9 @@ await pool.query(`
   } catch (err) {
     await pool.query('ROLLBACK');
     console.error('Error adding maintenance record:', err);
-    res.status(500).json({ message: 'Error adding maintenance record' });
+    res.status(500).json({ message: 'Error adding maintenance record', error: err.message });
   }
 });
-
-
 
 //update executor feedback 
 router.post('/maintenance/:id/executor-feedback', async (req, res) => {
